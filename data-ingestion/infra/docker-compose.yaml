@@ -1,0 +1,50 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: mara_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      # This maps the internal storage to the named volume defined below
+      - qdrant_data_vol:/qdrant/storage
+      - qdrant_logs_vol:/qdrant/logs
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+  
+  neo4j:
+    image: neo4j:latest
+    container_name: mara_neo4j
+    ports:
+      - "7474:7474" # HTTP (Browser UI)
+      - "7687:7687" # Bolt Protocol (Code Connection)
+    environment:
+      - NEO4J_AUTH=neo4j/testpassword
+      # Enable APOC (Awesome Procedures On Cypher) plugin - Essential for RAG
+      - NEO4J_PLUGINS=["apoc", "graph-data-science","bloom","genai"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+    volumes:
+      - neo4j_data_vol:/data
+      - neo4j_logs_vol:/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7474/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+
+# Define named volumes for persistence
+volumes:
+  qdrant_data_vol:
+  neo4j_data_vol:
+  neo4j_logs_vol:
+  qdrant_logs_vol:
+
+

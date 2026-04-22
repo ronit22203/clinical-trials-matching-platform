@@ -1,0 +1,152 @@
+"""
+GraphRAG tool: hybrid retrieval combining Qdrant vector search with Neo4j graph context.
+
+Heavy dependencies (qdrant_client, neo4j, sentence_transformers) are imported lazily
+so the tool registry can load this module without requiring all deps to be installed.
+"""
+import logging
+import re
+from typing import Any, Dict, List
+
+from ..base import BaseTool
+
+logger = logging.getLogger(__name__)
+
+# Common words that add noise to entity/keyword matching
+_STOP_WORDS = {
+    "what", "are", "the", "is", "a", "an", "of", "for", "in", "on", "at",
+    "to", "and", "or", "with", "by", "from", "tell", "me", "about", "list",
+    "show", "find", "give", "search", "get", "how", "does", "do", "can",
+    "will", "has", "have", "been", "be", "was", "were", "any", "all", "some",
+}
+
+
+def _extract_keywords(query: str, max_keywords: int = 5) -> List[str]:
+    """Extract meaningful keywords from a natural-language query."""
+    words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9\-]+\b", query)
+    return [w for w in words if w.lower() not in _STOP_WORDS and len(w) > 2][:max_keywords]
+
+
+class GraphRAGTool(BaseTool):
+    """
+    Hybrid retrieval: Qdrant semantic search + Neo4j knowledge-graph enrichment.
+
+    Vector search casts a wide net over document chunks; the graph layer
+    adds structured entity relationships keyed on keywords from the query.
+    """
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # Lazy-init — clients are created on first use
+        self._qdrant = None
+        self._embedder = None
+        self._driver = None
+
+    @property
+    def description(self) -> str:
+        return (
+            "Search medical literature and clinical documents using hybrid "
+            "vector + knowledge graph retrieval. Input should be a natural "
+            "language query about a clinical topic, drug, condition, or study."
+        )
+
+    # ------------------------------------------------------------------
+    # Lazy client accessors
+    # ------------------------------------------------------------------
+
+    def _qdrant_client(self):
+        if self._qdrant is None:
+            from qdrant_client import QdrantClient
+            self._qdrant = QdrantClient(self.config["qdrant_url"])
+        return self._qdrant
+
+    def _embedder_model(self):
+        if self._embedder is None:
+            from sentence_transformers import SentenceTransformer
+            cache_dir = self.config.get("model_cache_dir", "data/models")
+            self._embedder = SentenceTransformer(
+                self.config["embedding_model"],
+                cache_folder=cache_dir,
+            )
+        return self._embedder
+
+    def _neo4j_driver(self):
+        if self._driver is None:
+            from neo4j import GraphDatabase
+            self._driver = GraphDatabase.driver(
+                self.config["neo4j_uri"],
+                auth=(self.config["neo4j_username"], self.config["neo4j_password"]),
+            )
+        return self._driver
+
+    # ------------------------------------------------------------------
+    # Retrieval helpers
+    # ------------------------------------------------------------------
+
+    def _vector_search(self, query: str, limit: int) -> List[Dict]:
+        query_vector = self._embedder_model().encode(query).tolist()
+        hits = self._qdrant_client().query_points(
+            collection_name=self.config["collection"],
+            query=query_vector,
+            limit=limit,
+        ).points
+        return [
+            {
+                "score": round(hit.score, 4),
+                "content": hit.payload.get("content", ""),
+                "source": hit.payload.get("source", ""),
+                "chunk_id": hit.payload.get("chunk_id"),
+                "chunk_index": hit.payload.get("chunk_index"),
+                "context": hit.payload.get("context"),
+            }
+            for hit in hits
+        ]
+
+    def _graph_context(self, keywords: List[str], limit: int) -> List[str]:
+        """Return entity–relation–entity triples whose head or tail matches any keyword."""
+        if not keywords:
+            return []
+        cypher = """
+            MATCH (h)-[r]->(t)
+            WHERE any(kw IN $keywords
+                      WHERE toLower(h.name) CONTAINS toLower(kw)
+                         OR toLower(t.name) CONTAINS toLower(kw))
+            RETURN h.name AS head, type(r) AS relation, t.name AS tail
+            LIMIT $limit
+        """
+        try:
+            with self._neo4j_driver().session() as session:
+                records = list(session.run(cypher, keywords=keywords, limit=limit))
+            return [f"{r['head']} --[{r['relation']}]--> {r['tail']}" for r in records]
+        except Exception as exc:
+            logger.warning("Neo4j query failed: %s", exc)
+            return []
+
+    # ------------------------------------------------------------------
+    # BaseTool interface
+    # ------------------------------------------------------------------
+
+    def execute(self, input: Any) -> Any:
+        query = input if isinstance(input, str) else input.get("query", "")
+        if not query.strip():
+            return "Error: No query provided."
+
+        limit = self.config.get("limit", 3)
+        neo4j_limit = self.config.get("neo4j_limit", 10)
+        keywords = _extract_keywords(query)
+
+        try:
+            vector_results = self._vector_search(query, limit)
+        except Exception as exc:
+            logger.error("Vector search failed: %s", exc)
+            return f"Error: Vector search failed — {exc}"
+
+        graph_facts = self._graph_context(keywords, neo4j_limit)
+
+        return {
+            "query": query,
+            "keywords": keywords,
+            "vector_results": vector_results,
+            "graph_facts": graph_facts,
+        }
+

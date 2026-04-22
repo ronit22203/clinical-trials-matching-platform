@@ -1,0 +1,98 @@
+.env
+.env.local
+.env.*.local
+temp/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+Thumbs.db
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Temporary and runtime
+*.tmp
+*.tmp.*
+.tmp/
+
+# Model weights and large binaries
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.gguf
+*.safetensors
+
+# Archive PDFs (real downloaded documents — too large and may contain PII)
+archive/bioRxiv-medical-pdfs/pdfs/
+archive/bioRxiv-medical-pdfs/__pycache__/
+archive/bioRxiv-medical-pdfs/metadata.json
+
+# Sample PDFs (downloaded from public sources — not for version control)
+samples/*.pdf
+samples/*.PDF
+
+# Data directories (pipeline outputs — use .gitkeep to preserve structure)
+data/raw/**/*
+data/ocr/**/*
+data/markdown/**/*
+data/cleaned/**/*
+data/chunks/**/*
+data/artifacts/**/*
+!data/**/.gitkeep
+
+# Test outputs and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+*.coveragerc.bak
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Secrets — never commit these
+*.pem
+*.key
+*.p12
+*.pfx
+*_rsa
+*_ecdsa
+id_rsa
+id_ed25519
+*.crt
+*.csr
+service_account*.json
+credentials*.json
+*secret*.json

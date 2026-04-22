@@ -1,0 +1,50 @@
+[project]
+name = "multi-cloud-graphrag"
+version = "0.1.0"
+description = "Multi-cloud GraphRAG for clinical trials with AWS S3 primary, Azure Blob fallback, and local catastrophic fallback"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "arxiv>=2.1.0",
+    "httpx>=0.27.0",
+    "pyyaml>=6.0",
+    "pytest>=8.0.0",
+    "tenacity>=8.0.0",
+]
+
+[project.optional-dependencies]
+cloud = [
+    "boto3>=1.34.0",
+    "azure-storage-blob>=12.19.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-xdist>=3.5.0",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "aws: AWS S3 storage tests",
+    "azure: Azure Blob Storage tests",
+    "local: Local filesystem storage tests",
+    "storage: All storage tests",
+    "integration: Integration tests requiring cloud credentials",
+    "slow: Slow running tests",
+]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "*/conftest.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+]

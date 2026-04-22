@@ -1,0 +1,390 @@
+{
+  "name": "MedPerf Paper Golden Dataset",
+  "description": "Query-relevant chunk pairs for testing retrieval systems on the MedPerf paper",
+  "paper": "MedPerf: Open Benchmarking Platform for Medical Artificial Intelligence using Federated Evaluation",
+  "total_queries": 20,
+  "chunking_strategy": "By document sections (approximate page ranges)",
+  "created_date": "2024-11-19",
+  
+  "queries": [
+    {
+      "id": "Q1",
+      "query": "What is MedPerf and what problem does it solve?",
+      "relevant_chunks": [1, 2, 3],
+      "answer_quality": "High",
+      "query_type": "definition",
+      "expected_answer_components": [
+        "Medical AI benchmarking platform",
+        "Federated evaluation approach",
+        "Addresses data privacy concerns"
+      ]
+    },
+    {
+      "id": "Q2",
+      "query": "What are the main challenges in medical AI that MedPerf addresses?",
+      "relevant_chunks": [5, 6],
+      "answer_quality": "High",
+      "query_type": "problem_statement",
+      "expected_answer_components": [
+        "Risk (liability, regulatory, public perception)",
+        "Cost (data preparation expenses)",
+        "Uncertain return on investment"
+      ]
+    },
+    {
+      "id": "Q3",
+      "query": "What is federated evaluation and how does it differ from federated learning?",
+      "relevant_chunks": [7, 9],
+      "answer_quality": "High",
+      "query_type": "technical_concept",
+      "expected_answer_components": [
+        "Model evaluation without data sharing",
+        "Lower risk than federated learning",
+        "Aggregates only evaluation metrics"
+      ]
+    },
+    {
+      "id": "Q4",
+      "query": "How does MedPerf mitigate privacy risks?",
+      "relevant_chunks": [7, 8],
+      "answer_quality": "High",
+      "query_type": "privacy_mechanism",
+      "expected_answer_components": [
+        "Data never leaves owner's possession",
+        "Human-in-the-loop approval",
+        "No network access for evaluation code"
+      ]
+    },
+    {
+      "id": "Q5",
+      "query": "What are the components of a MedPerf benchmark?",
+      "relevant_chunks": [10],
+      "answer_quality": "Medium",
+      "query_type": "architecture",
+      "expected_answer_components": [
+        "Specifications",
+        "Dataset preparation",
+        "Evaluation implementation",
+        "Reference implementation"
+      ]
+    },
+    {
+      "id": "Q6",
+      "query": "What user roles exist in the MedPerf platform?",
+      "relevant_chunks": [11, 15],
+      "answer_quality": "High",
+      "query_type": "role_definition",
+      "expected_answer_components": [
+        "Benchmark group",
+        "Data owner",
+        "Model owner",
+        "Platform provider"
+      ]
+    },
+    {
+      "id": "Q7",
+      "query": "What is MLCube and how is it used in MedPerf?",
+      "relevant_chunks": [8, 9, 11],
+      "answer_quality": "Medium",
+      "query_type": "technical_detail",
+      "expected_answer_components": [
+        "Container standard",
+        "Extends Docker/Singularity",
+        "Consistent file system interface"
+      ]
+    },
+    {
+      "id": "Q8",
+      "query": "How does MedPerf reduce costs for data owners?",
+      "relevant_chunks": [8, 9],
+      "answer_quality": "Medium",
+      "query_type": "benefit",
+      "expected_answer_components": [
+        "Open-source infrastructure",
+        "Best practices sharing",
+        "Community coordination"
+      ]
+    },
+    {
+      "id": "Q9",
+      "query": "What are the roadmap stages for MedPerf?",
+      "relevant_chunks": [11, 12, 17],
+      "answer_quality": "High",
+      "query_type": "project_plan",
+      "expected_answer_components": [
+        "Design phase complete",
+        "Sample benchmarks in progress",
+        "Single-system then distributed proof-of-concept"
+      ]
+    },
+    {
+      "id": "Q10",
+      "query": "What medical imaging standards does MedPerf support?",
+      "relevant_chunks": [11],
+      "answer_quality": "Low",
+      "query_type": "standards",
+      "expected_answer_components": [
+        "DICOM",
+        "Vendor Neutral Archives (VNA)",
+        "OMOP",
+        "HL7/FHIR"
+      ]
+    },
+    {
+      "id": "Q11",
+      "query": "Why is model generalization important in medical AI?",
+      "relevant_chunks": [3],
+      "answer_quality": "Medium",
+      "query_type": "motivation",
+      "expected_answer_components": [
+        "Bias toward specific populations",
+        "Distribution shifts",
+        "Performance degradation in deployment"
+      ]
+    },
+    {
+      "id": "Q12",
+      "query": "What data preparation steps are required for medical AI?",
+      "relevant_chunks": [5, 6],
+      "answer_quality": "Medium",
+      "query_type": "process",
+      "expected_answer_components": [
+        "Data collection",
+        "Transformation",
+        "Anonymization",
+        "Labeling",
+        "Review"
+      ]
+    },
+    {
+      "id": "Q13",
+      "query": "How does MedPerf handle model intellectual property?",
+      "relevant_chunks": [7, 9],
+      "answer_quality": "Low",
+      "query_type": "legal_aspect",
+      "expected_answer_components": [
+        "Models remain with owners",
+        "Only hash registration",
+        "No direct handling of proprietary models"
+      ]
+    },
+    {
+      "id": "Q14",
+      "query": "What are the pilot medical benchmarks mentioned?",
+      "relevant_chunks": [17],
+      "answer_quality": "High",
+      "query_type": "specific_example",
+      "expected_answer_components": [
+        "CT of abdomen",
+        "Chest x-ray",
+        "Brain tumor segmentation"
+      ]
+    },
+    {
+      "id": "Q15",
+      "query": "What organizations are involved in MedPerf?",
+      "relevant_chunks": [1, 4],
+      "answer_quality": "Low",
+      "query_type": "partnership",
+      "expected_answer_components": [
+        "MLCommons",
+        "18 companies",
+        "13 universities",
+        "6 hospitals",
+        "10 countries"
+      ]
+    },
+    {
+      "id": "Q16",
+      "query": "How does MedPerf build an on-ramp to federated learning?",
+      "relevant_chunks": [9, 10],
+      "answer_quality": "Medium",
+      "query_type": "strategy",
+      "expected_answer_components": [
+        "Builds industry familiarity",
+        "Lower-risk starting point",
+        "Concrete immediate benefits"
+      ]
+    },
+    {
+      "id": "Q17",
+      "query": "What regulatory frameworks are mentioned for medical AI?",
+      "relevant_chunks": [3],
+      "answer_quality": "Low",
+      "query_type": "regulatory",
+      "expected_answer_components": [
+        "US FDA",
+        "European Medicines Agency",
+        "India's CDSCO"
+      ]
+    },
+    {
+      "id": "Q18",
+      "query": "How does MedPerf increase confidence in AI models?",
+      "relevant_chunks": [9],
+      "answer_quality": "Medium",
+      "query_type": "trust",
+      "expected_answer_components": [
+        "Multi-site evaluation",
+        "Large virtual test sets",
+        "Performance feedback"
+      ]
+    },
+    {
+      "id": "Q19",
+      "query": "What is the role of human evaluators in MedPerf?",
+      "relevant_chunks": [8],
+      "answer_quality": "High",
+      "query_type": "human_in_loop",
+      "expected_answer_components": [
+        "System administrator approval",
+        "Model evaluation approval",
+        "Result upload approval"
+      ]
+    },
+    {
+      "id": "Q20",
+      "query": "What calls to action does the paper make?",
+      "relevant_chunks": [12, 13],
+      "answer_quality": "Medium",
+      "query_type": "conclusion",
+      "expected_answer_components": [
+        "Healthcare stakeholders form benchmark groups",
+        "AI researchers test platform",
+        "Data owners register data",
+        "Regulatory bodies develop requirements"
+      ]
+    }
+  ],
+  
+  "chunks": [
+    {
+      "chunk_id": 1,
+      "page_range": "1-2",
+      "content": "Title, authors, affiliations, and abstract. Defines MedPerf as an open framework for benchmarking machine learning in medical domain using federated evaluation.",
+      "type": "metadata_and_abstract"
+    },
+    {
+      "chunk_id": 2,
+      "page_range": "2",
+      "content": "Abstract continuation and introduction to need for wide data access and model generalization in medical AI.",
+      "type": "introduction"
+    },
+    {
+      "chunk_id": 3,
+      "page_range": "3-4",
+      "content": "Introduction continues: Need for large-scale validation, regulatory frameworks, data diversity, distribution shifts, and domain generalization issues.",
+      "type": "problem_background"
+    },
+    {
+      "chunk_id": 4,
+      "page_range": "4",
+      "content": "Introduction of MedPerf approach, built on MLPerf, federated learning frameworks, and medical AI challenges.",
+      "type": "solution_intro"
+    },
+    {
+      "chunk_id": 5,
+      "page_range": "5",
+      "content": "Challenges section: Risk categories (liability, regulatory, public perception) and cost overview.",
+      "type": "challenges_risk"
+    },
+    {
+      "chunk_id": 6,
+      "page_range": "5-6",
+      "content": "Cost details: 7-step data preparation process (collection, transformation, anonymization, labeling, review, licensing, sharing) and uncertain ROI.",
+      "type": "challenges_cost"
+    },
+    {
+      "chunk_id": 7,
+      "page_range": "7",
+      "content": "Proposed solution: Federated evaluation definition, benefits, privacy protection, and risk mitigation approach.",
+      "type": "solution_approach"
+    },
+    {
+      "chunk_id": 8,
+      "page_range": "7-8",
+      "content": "Risk mitigation details: Human-in-the-loop, security restrictions, social trust, and MLCommons governance.",
+      "type": "risk_mitigation"
+    },
+    {
+      "chunk_id": 9,
+      "page_range": "8-9",
+      "content": "Cost reduction through MLCube containers, open infrastructure, and ROI benefits through better evaluation.",
+      "type": "implementation_details"
+    },
+    {
+      "chunk_id": 10,
+      "page_range": "9-10",
+      "content": "On-ramp to federated learning and MedPerf technical approach including benchmark definition components.",
+      "type": "technical_approach"
+    },
+    {
+      "chunk_id": 11,
+      "page_range": "10-11",
+      "content": "Benchmark components detailed: specifications, dataset preparation, evaluation, reference implementation, and user roles table.",
+      "type": "benchmark_details"
+    },
+    {
+      "chunk_id": 12,
+      "page_range": "11-12",
+      "content": "Workflow description and roadmap overview with phases and progress status.",
+      "type": "workflow"
+    },
+    {
+      "chunk_id": 13,
+      "page_range": "12",
+      "content": "Related work section: Comparison with other federated approaches, benchmarking efforts, and medical AI initiatives.",
+      "type": "related_work"
+    },
+    {
+      "chunk_id": 14,
+      "page_range": "12-13",
+      "content": "Discussion, conclusion, and calls to action for different stakeholders.",
+      "type": "conclusion"
+    },
+    {
+      "chunk_id": 15,
+      "page_range": "14-15",
+      "content": "Figures and tables: Workflow diagram and user roles table with responsibilities.",
+      "type": "tables_figures"
+    },
+    {
+      "chunk_id": 16,
+      "page_range": "16",
+      "content": "Table 2: Benchmarking workflow steps and details.",
+      "type": "workflow_table"
+    },
+    {
+      "chunk_id": 17,
+      "page_range": "17",
+      "content": "Table 3: MedPerf roadmap stages, scope, and implementation details.",
+      "type": "roadmap_table"
+    },
+    {
+      "chunk_id": 18,
+      "page_range": "18-22",
+      "content": "References section (papers 1-50 cited in the document).",
+      "type": "references"
+    },
+    {
+      "chunk_id": 19,
+      "page_range": "23",
+      "content": "Author contributions and conflict of interest statement.",
+      "type": "acknowledgments"
+    }
+  ],
+  
+  "evaluation_metrics": {
+    "recommended_metrics": [
+      "Hit Rate @5",
+      "Mean Reciprocal Rank (MRR)",
+      "Precision @3",
+      "nDCG @10"
+    ],
+    "difficulty_levels": {
+      "easy": ["Q1", "Q3", "Q6", "Q14"],
+      "medium": ["Q2", "Q4", "Q8", "Q11", "Q12", "Q16", "Q18"],
+      "hard": ["Q5", "Q7", "Q9", "Q10", "Q13", "Q15", "Q17", "Q19", "Q20"]
+    }
+  }
+}

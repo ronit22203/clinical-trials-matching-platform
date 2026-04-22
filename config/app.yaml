@@ -1,0 +1,1056 @@
+services:
+  neo4j:
+    uri: ${NEO4J_URI}
+    user: ${NEO4J_USER}
+    database: neo4j
+  qdrant:
+    url: ${QDRANT_URL}
+    collection: medical_papers
+  temporal:
+    host: ${TEMPORAL_HOST}
+data_ingestion:
+  project_root: .
+  input_dir: ../data/pdfs
+  log_file: ../data/artifacts/ingestion.log
+  output:
+    ocr_dir: ../data/artifacts/ocr
+    markdown_dir: ../data/artifacts/markdown
+    cleaned_dir: ../data/artifacts/cleaned
+    chunks_dir: ../data/artifacts/chunks
+  ocr:
+    langs:
+    - en
+    device: mps
+    det_batch_size: 2
+    rec_batch_size: 16
+    image_scale: 2
+    output_dir: ../data/artifacts/ocr
+    confidence_threshold: 0.8
+    save_debug_images: false
+    max_pages: null
+  conversion:
+    infer_headers: true
+    preserve_spacing: true
+    paragraph_gap_multiplier: 2.0
+    bold_header_max_chars: 50
+  cleaning:
+    remove_phantom_links: true
+    remove_images: true
+    linearize_tables: true
+    fix_hyphenation: true
+    collapse_whitespace: true
+    remove_pii: true
+    fail_safe_on_pii_error: true
+    language: en
+    pii_entities:
+    - PHONE_NUMBER
+    - EMAIL_ADDRESS
+    - SG_NRIC
+    pii_replacements:
+      DEFAULT: <REDACTED>
+      EMAIL_ADDRESS: <EMAIL>
+      PHONE_NUMBER: <PHONE>
+      SG_NRIC: <NRIC_ID>
+    custom_recognizers:
+    - entity: SG_NRIC
+      regex: (?i)[STFG]\d{7}[A-Z]
+      score: 1.0
+  chunking:
+    max_tokens: 500
+    chunk_overlap: 50
+    min_chunk_tokens: 20
+    headers_to_split:
+    - '#'
+    - '##'
+    - '###'
+    respect_atomic_blocks: true
+  vectorization:
+    model_name: BAAI/bge-small-en-v1.5
+    embedding_dim: 384
+    device: cpu
+    normalize_embeddings: false
+    distance_metric: cosine
+    qdrant_url: ${QDRANT_URL}
+    collection_name: medical_papers
+    batch_size: 64
+  neo4j:
+    uri: ${NEO4J_URI}
+    user: ${NEO4J_USER}
+    password: ${NEO4J_PASSWORD}
+    database: neo4j
+  knowledge_graph:
+    enabled: true
+    model: cniongolo/biomistral:latest
+    ollama_url: ${OLLAMA_BASE_URL}/api/generate
+    max_retries: 2
+    timeout_seconds: 120
+    max_text_chars: 2000
+    min_chunk_chars: 50
+  retrieval:
+    default_limit: 3
+    hybrid_search: true
+  pipeline:
+    skip_existing: false
+    max_retries: 1
+    parallel_workers: 1
+  logging:
+    level: INFO
+    save_artifacts: true
+    console_level: INFO
+    file_level: DEBUG
+    max_size_mb: 50
+    backup_count: 3
+data_acquisition:
+  defaults:
+    storage_mode: local
+    default_source: medrxiv
+    default_limit: 5
+    output_dir: ../../data/pdfs
+  sources:
+    biorxiv:
+      name: biorxiv
+      description: Fetch medical preprint PDFs from bioRxiv via the arXiv API (q-bio
+        papers with 10.1101 DOIs)
+      type: api
+      enabled: true
+      api:
+        base_url: https://arxiv.org
+        search_endpoint: /search/
+        pdf_url_pattern: https://arxiv.org/pdf/{arxiv_id}
+        timeout_seconds: 60
+        max_retries: 3
+        user_agent: Multi-Cloud-GraphRAG/1.0 (https://github.com/YOUR-USERNAME/data-acquisition-multicloud)
+      rate_limit:
+        calls_per_minute: 30
+        concurrency: 2
+        burst_size: 5
+      search:
+        default_query: cancer immunotherapy
+        biorxiv_filter: (all:bioRxiv OR all:q-bio)
+        max_results_per_query: 50
+        max_pdfs_per_run: 20
+        sort_by: submittedDate
+        categories:
+          oncology:
+          - cancer
+          - tumor
+          - oncology
+          - carcinoma
+          - metastasis
+          - chemotherapy
+          - neoplasm
+          - malignant
+          cardiology:
+          - heart
+          - cardiac
+          - cardiovascular
+          - myocardial
+          - arrhythmia
+          - hypertension
+          - atherosclerosis
+          neurology:
+          - brain
+          - neural
+          - neuro
+          - stroke
+          - alzheimer
+          - parkinson
+          - epilepsy
+          - dementia
+          infectious_disease:
+          - virus
+          - bacterial
+          - infection
+          - pandemic
+          - covid
+          - pathogen
+          - antibiotic
+          - viral
+          immunology:
+          - immune
+          - antibody
+          - vaccine
+          - immunotherapy
+          - cytokine
+          - autoimmune
+          - inflammation
+          genetics:
+          - mutation
+          - gene
+          - genetic
+          - variant
+          - genome
+          - CRISPR
+          - genomic
+          - hereditary
+          pharmacology:
+          - drug
+          - therapeutic
+          - treatment
+          - compound
+          - pharmacology
+          - dosage
+          - efficacy
+          diagnostics:
+          - biomarker
+          - diagnostic
+          - imaging
+          - detection
+          - screening
+          - MRI
+          - radiology
+          - pathology
+          epidemiology:
+          - epidemiology
+          - prevalence
+          - incidence
+          - cohort
+          - population
+          - mortality
+          - morbidity
+          public_health:
+          - public health
+          - healthcare
+          - policy
+          - intervention
+          - prevention
+          - global health
+      storage:
+        primary:
+          provider: aws
+          bucket: clinical-trials-pdfs
+          region: ap-south-1
+          prefix: raw/biorxiv/
+        fallback:
+          provider: azure
+          container: clinical-trials-fallback
+          prefix: raw/biorxiv/
+      metadata:
+        version: '1.0'
+        include_fields:
+        - nct_id
+        - brief_title
+        - official_title
+        - lead_sponsor_name
+        - study_type
+        - last_update_post_date
+        custom_fields:
+        - fetched_at
+        - source_version
+        - pdf_type
+        - doi
+        - authors
+        - summary
+        - arxiv_id
+      processing:
+        tiers:
+          primary:
+            type: gpu_spot
+            instance: g4dn.xlarge
+            max_cost_per_hour: 0.15
+            timeout_minutes: 30
+          fallback_1:
+            type: azure_di
+            max_cost_per_page: 0.0015
+            timeout_minutes: 10
+          fallback_2:
+            type: cpu_tesseract
+            max_cost_per_hour: 0.01
+            timeout_minutes: 60
+        quality_thresholds:
+          min_entity_accuracy: 0.85
+          max_hallucination_rate: 0.05
+      metrics:
+        enabled: true
+        push_to_prometheus: true
+        track:
+        - download_duration
+        - upload_duration
+        - file_size_bytes
+        - fallback_reason
+        - cost_per_document
+        alerts:
+          fallback_rate_threshold: 0.15
+          cost_spike_threshold: 50
+          silent_failure_threshold: 0.01
+      cost_tracking:
+        budget_daily: 10
+        budget_monthly: 50
+        alert_at_percent: 80
+        rates:
+          gpu_spot: 0.12
+          azure_di: 0.0015
+          cpu_tesseract: 0.01
+          s3_storage: 0.023
+          metadata_storage: 0.0001
+    clinical_trials:
+      name: clinical_trials
+      description: Fetch protocol and results PDFs from ClinicalTrials.gov with multi-cloud
+        fallback
+      type: api
+      enabled: true
+      api:
+        base_url: https://clinicaltrials.gov
+        search_endpoint: /api/v2/studies
+        pdf_patterns:
+          protocol: https://clinicaltrials.gov/ProvidedDocs/{last_two}/{nct_id}/Prot_{nct_id}.pdf
+          results: https://clinicaltrials.gov/ProvidedDocs/{last_two}/{nct_id}/Results_{nct_id}.pdf
+        timeout_seconds: 30
+        max_retries: 3
+        user_agent: Multi-Cloud-GraphRAG/1.0 (https://github.com/YOUR-USERNAME/data-acquisition-multicloud)
+      rate_limit:
+        calls_per_minute: 100
+        concurrency: 3
+        burst_size: 10
+      search:
+        default_query: cancer immunotherapy
+        max_studies_per_query: 100
+        max_pdfs_per_run: 50
+        fields:
+        - nct_id
+        - brief_title
+        - official_title
+        - overall_status
+        - lead_sponsor_name
+        - study_type
+        - phase
+        - enrollment_count
+        - last_update_post_date
+      storage:
+        primary:
+          provider: aws
+          bucket: clinical-trials-pdfs
+          region: ap-south-1
+          prefix: raw/clinical_trials/
+        fallback:
+          provider: azure
+          container: clinical-trials-fallback
+          prefix: raw/clinical_trials/
+      metadata:
+        version: '1.0'
+        include_fields:
+        - nct_id
+        - brief_title
+        - overall_status
+        - lead_sponsor_name
+        - study_type
+        - phase
+        - enrollment_count
+        - last_update_post_date
+        custom_fields:
+        - fetched_at
+        - source_version
+        - pdf_type
+        - processing_tier
+      processing:
+        tiers:
+          primary:
+            type: gpu_spot
+            instance: g4dn.xlarge
+            max_cost_per_hour: 0.15
+            timeout_minutes: 30
+          fallback_1:
+            type: azure_di
+            max_cost_per_page: 0.0015
+            timeout_minutes: 10
+          fallback_2:
+            type: cpu_tesseract
+            max_cost_per_hour: 0.01
+            timeout_minutes: 60
+        quality_thresholds:
+          min_entity_accuracy: 0.85
+          max_hallucination_rate: 0.05
+          required_fields:
+          - drug_names
+          - dosages
+          - dates
+      metrics:
+        enabled: true
+        push_to_prometheus: true
+        track:
+        - download_duration
+        - upload_duration
+        - file_size_bytes
+        - fallback_reason
+        - cost_per_document
+        - extraction_quality
+        alerts:
+          fallback_rate_threshold: 0.15
+          cost_spike_threshold: 50
+          silent_failure_threshold: 0.01
+      chaos:
+        enabled: true
+        simulate_failures:
+          spot_termination_probability: 0.05
+          api_rate_limit_probability: 0.02
+          s3_unavailable_probability: 0.01
+          azure_di_throttle_probability: 0.03
+        recovery_targets:
+          spot_termination_seconds: 45
+          api_rate_limit_seconds: 10
+          cloud_failover_seconds: 120
+      quality_validation:
+        sample_rate: 0.1
+        metrics:
+          recall_5_target: 0.85
+          ndcg_5_target: 0.8
+          entity_accuracy_target: 0.9
+          hallucination_rate_max: 0.03
+      cost_tracking:
+        budget_daily: 10
+        budget_monthly: 50
+        alert_at_percent: 80
+        rates:
+          gpu_spot: 0.12
+          azure_di: 0.0015
+          cpu_tesseract: 0.01
+          s3_storage: 0.023
+          metadata_storage: 0.0001
+    medrxiv:
+      name: medrxiv
+      description: Fetch health-sciences preprint PDFs from medRxiv via the medRxiv
+        REST API
+      type: api
+      enabled: true
+      api:
+        base_url: https://api.medrxiv.org
+        details_endpoint: /details/medrxiv
+        pdf_url_pattern: https://www.medrxiv.org/content/{doi}.full.pdf
+        timeout_seconds: 60
+        max_retries: 3
+        user_agent: Multi-Cloud-GraphRAG/1.0 (https://github.com/YOUR-USERNAME/data-acquisition-multicloud)
+        lookback_days: 30
+        page_size: 100
+      rate_limit:
+        calls_per_minute: 20
+        concurrency: 2
+        burst_size: 5
+      search:
+        default_query: clinical trial treatment
+        max_results_per_query: 50
+        max_pdfs_per_run: 20
+        categories:
+          oncology:
+          - cancer
+          - tumor
+          - oncology
+          - carcinoma
+          - metastasis
+          - chemotherapy
+          - neoplasm
+          - malignant
+          cardiology:
+          - heart
+          - cardiac
+          - cardiovascular
+          - myocardial
+          - arrhythmia
+          - hypertension
+          - atherosclerosis
+          neurology:
+          - brain
+          - neural
+          - neuro
+          - stroke
+          - alzheimer
+          - parkinson
+          - epilepsy
+          - dementia
+          infectious_disease:
+          - virus
+          - bacterial
+          - infection
+          - pandemic
+          - covid
+          - pathogen
+          - antibiotic
+          - viral
+          immunology:
+          - immune
+          - antibody
+          - vaccine
+          - immunotherapy
+          - cytokine
+          - autoimmune
+          - inflammation
+          genetics:
+          - mutation
+          - gene
+          - genetic
+          - variant
+          - genome
+          - CRISPR
+          - genomic
+          - hereditary
+          pharmacology:
+          - drug
+          - therapeutic
+          - treatment
+          - compound
+          - pharmacology
+          - dosage
+          - efficacy
+          diagnostics:
+          - biomarker
+          - diagnostic
+          - imaging
+          - detection
+          - screening
+          - MRI
+          - radiology
+          - pathology
+          epidemiology:
+          - epidemiology
+          - prevalence
+          - incidence
+          - cohort
+          - population
+          - mortality
+          - morbidity
+          public_health:
+          - public health
+          - healthcare
+          - policy
+          - intervention
+          - prevention
+          - global health
+      storage:
+        primary:
+          provider: aws
+          bucket: clinical-trials-pdfs
+          region: ap-south-1
+          prefix: raw/medrxiv/
+        fallback:
+          provider: azure
+          container: clinical-trials-fallback
+          prefix: raw/medrxiv/
+      metadata:
+        version: '1.0'
+        include_fields:
+        - nct_id
+        - brief_title
+        - official_title
+        - lead_sponsor_name
+        - study_type
+        - last_update_post_date
+        custom_fields:
+        - fetched_at
+        - source_version
+        - pdf_type
+        - doi
+        - authors
+        - abstract
+        - medrxiv_category
+        - published_date
+        - version
+      processing:
+        tiers:
+          primary:
+            type: gpu_spot
+            instance: g4dn.xlarge
+            max_cost_per_hour: 0.15
+            timeout_minutes: 30
+          fallback_1:
+            type: azure_di
+            max_cost_per_page: 0.0015
+            timeout_minutes: 10
+          fallback_2:
+            type: cpu_tesseract
+            max_cost_per_hour: 0.01
+            timeout_minutes: 60
+        quality_thresholds:
+          min_entity_accuracy: 0.85
+          max_hallucination_rate: 0.05
+      metrics:
+        enabled: true
+        push_to_prometheus: true
+        track:
+        - download_duration
+        - upload_duration
+        - file_size_bytes
+        - fallback_reason
+        - cost_per_document
+        alerts:
+          fallback_rate_threshold: 0.15
+          cost_spike_threshold: 50
+          silent_failure_threshold: 0.01
+      cost_tracking:
+        budget_daily: 10
+        budget_monthly: 50
+        alert_at_percent: 80
+        rates:
+          gpu_spot: 0.12
+          azure_di: 0.0015
+          cpu_tesseract: 0.01
+          s3_storage: 0.023
+          metadata_storage: 0.0001
+    pubmed:
+      name: pubmed
+      description: Fetch full-text PDFs from PubMed Central (PMC) via NCBI E-utilities
+      type: api
+      enabled: true
+      api:
+        base_url: https://eutils.ncbi.nlm.nih.gov/entrez/eutils
+        search_endpoint: /esearch.fcgi
+        summary_endpoint: /esummary.fcgi
+        pdf_base_url: https://www.ncbi.nlm.nih.gov/pmc/articles
+        oa_service_url: https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi
+        ftp_https_mirror: https://ftp.ncbi.nlm.nih.gov
+        pdf_patterns:
+          fulltext: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{nct_id}/pdf/
+        min_pdf_bytes: 51200
+        timeout_seconds: 30
+        max_retries: 3
+        user_agent: Multi-Cloud-GraphRAG/1.0 (tool=multi-cloud-graphrag; email=contact@example.com)
+        api_key_env: NCBI_API_KEY
+      rate_limit:
+        calls_per_minute: 180
+        concurrency: 3
+        burst_size: 5
+      search:
+        db: pmc
+        default_query: cancer immunotherapy
+        max_studies_per_query: 100
+        max_pdfs_per_run: 50
+        open_access_filter: open access[filter]
+        fields:
+        - uid
+        - title
+        - source
+        - authors
+        - pubdate
+        - fulljournalname
+        - doi
+      storage:
+        primary:
+          provider: aws
+          bucket: clinical-trials-pdfs
+          region: ap-south-1
+          prefix: raw/pubmed/
+        fallback:
+          provider: azure
+          container: clinical-trials-fallback
+          prefix: raw/pubmed/
+      metadata:
+        version: '1.0'
+        include_fields:
+        - pmcid
+        - title
+        - journal
+        - authors
+        - pubdate
+        - doi
+        custom_fields:
+        - fetched_at
+        - source_version
+        - pdf_type
+        - processing_tier
+      cost_tracking:
+        budget_daily: 10
+        budget_monthly: 50
+        alert_at_percent: 80
+        rates:
+          s3_storage: 0.023
+          metadata_storage: 0.0001
+  storage:
+    aws_s3:
+      provider: aws
+      profile: clinical-trials-fetcher
+      region: ap-south-1
+      default: true
+      buckets:
+        clinical-trials-pdfs:
+          name: clinical-trials-pdfs-prod-ap-south-1--aps1-az1--x-s3
+          region: ap-south-1
+          versioning: true
+          encryption: AES256
+          lifecycle_days: 365
+          paths:
+            raw: raw/{source}/{year}/{month}/{day}/{nct_id}/{pdf_type}.pdf
+            metadata: metadata/{source}/{year}/{month}/{day}/{nct_id}.json
+            manifests: manifests/{source}/{run_id}.json
+            quality_reports: quality/{source}/{date}/sample_{sample_id}.json
+        metrics-store:
+          name: graphrag-metrics
+          region: ap-south-1
+          versioning: false
+          encryption: AES256
+          lifecycle_days: 90
+          paths:
+            cost_reports: cost/{year}/{month}/daily.json
+            performance: performance/{year}/{month}/latency.json
+            fallback_events: fallback/{year}/{month}/events.json
+      retry:
+        max_attempts: 3
+        backoff_factor: 1.5
+        jitter: true
+      multipart:
+        threshold_mb: 100
+        chunk_size_mb: 10
+      cost:
+        storage_per_gb: 0.023
+        glacier_per_gb: 0.004
+        put_requests: 0.005
+        get_requests: 0.0004
+        tracking:
+          enabled: true
+          tag_uploads: true
+          tags:
+            project: multi-cloud-graphrag
+            source: clinical_trials
+            environment: production
+      monitoring:
+        cloudwatch_metrics: true
+        namespace: GraphRAG/ClinicalTrials
+        alarms:
+          upload_failure_rate:
+            threshold: 0.05
+            period_seconds: 300
+          bucket_size_gb:
+            threshold: 100
+            period_days: 7
+    azure_blob:
+      provider: azure
+      connection_string: ${AZURE_STORAGE_CONNECTION_STRING}
+      default: false
+      account: ${AZURE_STORAGE_ACCOUNT}
+      resource_group: ${AZURE_STORAGE_RESOURCE_GROUP}
+      location: centralindia
+      containers:
+        clinical-trials-fallback:
+          name: clinical-trials-fallback
+          access_level: private
+          versioning: true
+          default_encryption: true
+          paths:
+            raw: raw/{source}/{year}/{month}/{day}/{nct_id}/{pdf_type}.pdf
+            metadata: metadata/{source}/{year}/{month}/{day}/{nct_id}.json
+            manifests: manifests/{source}/{run_id}.json
+        metrics-fallback:
+          name: graphrag-metrics-fallback
+          access_level: private
+          versioning: false
+          paths:
+            fallback_events: fallback/{year}/{month}/events.json
+            cost_alerts: alerts/cost/{date}.json
+      retry:
+        max_attempts: 3
+        backoff_factor: 2.0
+        timeout_seconds: 60
+      cost:
+        hot_storage_per_gb: 0.018
+        cool_storage_per_gb: 0.01
+        write_operations: 0.05
+        read_operations: 0.004
+        tracking:
+          enabled: true
+          budget_daily: 5
+          alert_when_percent: 80
+          tags:
+            project: multi-cloud-graphrag
+            source: clinical_trials
+            tier: fallback
+      fallback_triggers:
+      - aws_s3_unavailable
+      - aws_s3_throttling
+      - cost_threshold_exceeded
+      - manual_override
+      monitoring:
+        azure_monitor: true
+        log_analytics_workspace: ${AZURE_WORKSPACE_ID}
+        alerts:
+          fallback_activated:
+            severity: 2
+            action_group: email-infra-team
+    local_fallback:
+      provider: local
+      enabled: true
+      priority: 1
+      paths:
+        base_dir: ../data/pdfs
+        raw: '{base_dir}/raw/{source}/{year}/{month}/{day}/{nct_id}/'
+        metadata: '{base_dir}/metadata/{source}/{year}/{month}/{day}/'
+        manifests: '{base_dir}/manifests/{source}/'
+      retention_days: 365
+      triggers:
+      - local_mode_default
+      cleanup:
+        enabled: false
+        min_free_space_gb: 10
+      metrics:
+        track_disk_usage: true
+        track_file_count: true
+        alert_at_percent: 90
+    providers:
+      chain:
+      - provider: local
+        priority: 1
+        default: true
+agentic_reasoning:
+  defaults:
+    default_agent: local_assistant
+    model: lmstudio/lmstudio-community/Qwen2.5-7B-Instruct-GGUF
+    embed_model: nomic-embed-text:latest
+    max_tokens: 4096
+    temperature: 0.1
+    tools_enabled:
+    - graphrag
+    - mcp_filesystem
+  agents:
+    assistant:
+      name: Clinical Research Assistant
+      model: ollama/qwen3:1.7b
+      system_prompt: "You are a clinical research assistant with access to five specialized\
+        \ tools. Use them based on the nature of the request, not keyword matching.\n\
+        Tool guidance: - fda_adverse_events: drug safety data, adverse event reports,\
+        \ FDA alerts, side effects, contraindications - clinical_trials: trial recruitment,\
+        \ NCT IDs, phase/status/eligibility, interventional studies - pubmed_search:\
+        \ peer-reviewed literature, mechanisms, epidemiology, recent publications\
+        \ - graphrag: internal documents, local knowledge base, patient records, lab\
+        \ reports, institutional data - mcp_filesystem: reading or writing files on\
+        \ the local filesystem \u2014 save reports, read local data files\nWhen a\
+        \ query spans multiple domains, call ALL relevant tools before synthesizing.\
+        \ Do not answer from memory alone when tools can provide live or local data.\n\
+        When synthesizing results: - Treat graphrag results as primary internal evidence\
+        \ \u2014 do not dismiss them - If a tool returns an error, note it briefly\
+        \ and continue with available data - Structure your response clearly: findings\
+        \ first, gaps second, recommendations last - Be specific \u2014 cite trial\
+        \ IDs, drug names, paper titles when available"
+      model_params:
+        temperature: 0.1
+        max_tokens: 4096
+        top_p: 0.9
+        frequency_penalty: 0.0
+        presence_penalty: 0.0
+      tools:
+      - name: fda_adverse_events
+      - name: clinical_trials
+      - name: pubmed_search
+      - name: graphrag
+      - name: mcp_filesystem
+    local_assistant:
+      name: Local Clinical Research Assistant
+      model: lmstudio/lmstudio-community/Qwen2.5-7B-Instruct-GGUF
+      system_prompt: "You are a clinical research assistant with access to a local\
+        \ knowledge base and filesystem tools. All operations run locally \u2014 no\
+        \ external APIs required.\nTool guidance: - graphrag: search internal medical\
+        \ documents, ingested PDFs, clinical evidence - mcp_filesystem: read or write\
+        \ files on the local filesystem\nWhen synthesizing results: - Treat graphrag\
+        \ results as primary evidence \u2014 do not dismiss them - If a tool returns\
+        \ an error, note it briefly and continue with available data - Structure your\
+        \ response: findings first, gaps second, recommendations last - Be specific\
+        \ \u2014 cite document names, trial IDs when available\nTo enable external\
+        \ tools (pubmed_search, clinical_trials, fda_adverse_events), switch to the\
+        \ 'assistant' agent config in app.yaml\
+        \ (requires internet access)."
+      model_params:
+        temperature: 0.1
+        max_tokens: 4096
+        top_p: 0.9
+        frequency_penalty: 0.0
+        presence_penalty: 0.0
+        response_format:
+          type: json_object
+      tools:
+      - name: graphrag
+      - name: mcp_filesystem
+    mcp_test:
+      name: mcp_test_agent
+      model: ollama/qwen3:1.7b
+      system_prompt: 'You are an assistant that can access the local filesystem via
+        MCP.
+
+        Use the mcp_filesystem tool to read files.
+
+        '
+      model_params:
+        temperature: 0.1
+        max_tokens: 1000
+      tools:
+      - name: mcp_filesystem
+    sglang_assistant:
+      name: Clinical Research Assistant (SGLang)
+      model: sglang/Qwen/Qwen2.5-7B-Instruct
+      system_prompt: "You are a clinical research assistant with access to five specialized\
+        \ tools. Use them based on the nature of the request, not keyword matching.\n\
+        Tool guidance: - fda_adverse_events: drug safety data, adverse event reports,\
+        \ FDA alerts, side effects, contraindications - clinical_trials: trial recruitment,\
+        \ NCT IDs, phase/status/eligibility, interventional studies - pubmed_search:\
+        \ peer-reviewed literature, mechanisms, epidemiology, recent publications\
+        \ - graphrag: internal documents, local knowledge base, patient records, lab\
+        \ reports, institutional data - mcp_filesystem: reading or writing files on\
+        \ the local filesystem \u2014 save reports, read local data files\nWhen a\
+        \ query spans multiple domains, call ALL relevant tools before synthesizing.\
+        \ Do not answer from memory alone when tools can provide live or local data.\n\
+        When synthesizing results: - Treat graphrag results as primary internal evidence\
+        \ \u2014 do not dismiss them - If a tool returns an error, note it briefly\
+        \ and continue with available data - Structure your response clearly: findings\
+        \ first, gaps second, recommendations last - Be specific \u2014 cite trial\
+        \ IDs, drug names, paper titles when available"
+      model_params:
+        temperature: 0.1
+        max_tokens: 4096
+        top_p: 0.9
+        frequency_penalty: 0.0
+        presence_penalty: 0.0
+      tools:
+      - name: fda_adverse_events
+      - name: clinical_trials
+      - name: pubmed_search
+      - name: graphrag
+      - name: mcp_filesystem
+  tools:
+    clinical_trials:
+      name: clinical_trials
+      description: Search ClinicalTrials.gov for studies by condition, drug, or intervention
+        name. Input should be a condition, drug, or disease name string.
+      type: api
+      module: src.tools.implementations.clinicaltrials
+      class_name: ClinicalTrialsTool
+      config:
+        base_url: https://clinicaltrials.gov
+        endpoint: /api/v2/studies
+        search_param: query.term
+        page_size_param: pageSize
+        limit: 5
+        timeout: 10
+        response:
+          results_key: studies
+          fields:
+            nct_id:
+            - protocolSection
+            - identificationModule
+            - nctId
+            title:
+            - protocolSection
+            - identificationModule
+            - briefTitle
+            status:
+            - protocolSection
+            - statusModule
+            - overallStatus
+            sponsor:
+            - protocolSection
+            - sponsorCollaboratorsModule
+            - leadSponsor
+            - leadSponsorName
+            summary:
+            - protocolSection
+            - descriptionModule
+            - briefSummary
+          summary_max_length: 300
+      auth:
+        type: none
+      rate_limit:
+        calls_per_minute: 100
+      enabled: true
+    fda_adverse_events:
+      name: fda_adverse_events
+      description: Query FDA adverse event reports by drug name. Input should be a
+        drug name string.
+      type: api
+      module: src.tools.implementations.openfda
+      class_name: OpenFDATool
+      config:
+        base_url: https://api.fda.gov
+        endpoint: /drug/event.json
+        search_param: patient.drug.medicinalproduct
+        limit: 5
+        timeout: 10
+        response:
+          results_key: results
+          total_path:
+          - meta
+          - results
+          - total
+          fields:
+            safety_report_id: safetyreportid
+            serious: serious
+            country: occurcountry
+            patient_sex:
+            - patient
+            - patientsex
+            reactions:
+            - patient
+            - reaction
+            - reactionmeddrapt
+            drugs:
+            - patient
+            - drug
+            - medicinalproduct
+      auth:
+        type: none
+      rate_limit:
+        calls_per_minute: 240
+      enabled: true
+    graphrag:
+      name: graphrag
+      description: Search medical literature and clinical documents using hybrid vector
+        + knowledge graph retrieval. Combines Qdrant semantic search with Neo4j entity
+        relationships. Input should be a natural language query about a clinical topic,
+        drug, condition, or study.
+      type: vector_db
+      module: src.tools.implementations.graphrag_tools
+      class_name: GraphRAGTool
+      config:
+        qdrant_url: ${QDRANT_URL}
+        collection: medical_papers
+        neo4j_uri: ${NEO4J_URI}
+        neo4j_username: ${NEO4J_USER}
+        neo4j_password: ${NEO4J_PASSWORD}
+        embedding_model: BAAI/bge-small-en-v1.5
+        model_cache_dir: data/models
+        limit: 3
+        neo4j_limit: 10
+      auth:
+        type: none
+      enabled: true
+    mcp_filesystem:
+      name: mcp_filesystem
+      description: Read and write files using MCP filesystem server. Allowed directories
+        include the Desktop and the project root.
+      module: src.tools.implementations.mcp_tool
+      class_name: MCPTool
+      config:
+        tool_name: write_file
+        default_arg_key: path
+        server:
+          command: npx
+          args:
+          - -y
+          - '@modelcontextprotocol/server-filesystem'
+          - /Users/ronitsaxena/Desktop
+          - /Users/ronitsaxena/Developer/clinical_agents
+          env: {}
+    pubmed_search:
+      name: pubmed_search
+      description: Search PubMed for biomedical literature. Input should be a search
+        query string (e.g., 'diabetes treatment metformin').
+      type: api
+      module: src.tools.implementations.pubmed
+      class_name: PubMedTool
+      config:
+        base_url: https://eutils.ncbi.nlm.nih.gov/entrez/eutils
+        search_endpoint: /esearch.fcgi
+        summary_endpoint: /esummary.fcgi
+        database: pubmed
+        limit: 5
+        timeout: 10
+        response:
+          id_path:
+          - esearchresult
+          - idlist
+          summary_results_key: result
+          fields:
+            title: title
+            journal: source
+            pub_date: pubdate
+            authors_field: authors
+            author_name_field: name
+            max_authors: 3
+          url_template: https://pubmed.ncbi.nlm.nih.gov/{pmid}/
+      auth:
+        type: none
+      rate_limit:
+        calls_per_minute: 60
+      enabled: true

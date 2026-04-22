@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+@layer base {
+  /* ── Light mode tokens ─────────────────────────────────── */
+  :root {
+    --primary:              #005050;
+    --primary-container:    #006a6a;
+    --primary-fixed-dim:    #84d4d3;
+
+    --surface:              #f9f9f9;
+    --surface-low:          #f3f4f3;
+    --surface-container:    #edeeee;
+    --surface-high:         #e7e8e8;
+    --surface-highest:      #e2e3e2;
+    --surface-lowest:       #ffffff;
+
+    --on-surface:           #1a1c1c;
+    --on-surface-variant:   #3e4948;
+    --on-primary:           #ffffff;
+
+    --tertiary:             #00497d;
+    --outline-variant:      #bec9c8;
+
+    --status-eligible:      #16a34a;
+    --status-partial:       #d97706;
+    --status-excluded:      #dc2626;
+  }
+
+  /* ── Dark mode tokens ──────────────────────────────────── */
+  .dark {
+    --primary:              #84d4d3;
+    --primary-container:    #5bbcbb;
+    --primary-fixed-dim:    #005050;
+
+    --surface:              #0f1414;
+    --surface-low:          #141a1a;
+    --surface-container:    #1c2424;
+    --surface-high:         #222c2c;
+    --surface-highest:      #2a3636;
+    --surface-lowest:       #192020;
+
+    --on-surface:           #e2e8e8;
+    --on-surface-variant:   #8fa8a7;
+    --on-primary:           #0f1414;
+
+    --tertiary:             #7ec8f0;
+    --outline-variant:      #2e4444;
+
+    --status-eligible:      #4ade80;
+    --status-partial:       #fbbf24;
+    --status-excluded:      #f87171;
+  }
+}
+
+@theme inline {
+  --color-primary:             var(--primary);
+  --color-primary-container:   var(--primary-container);
+  --color-primary-fixed-dim:   var(--primary-fixed-dim);
+  --color-surface:             var(--surface);
+  --color-surface-low:         var(--surface-low);
+  --color-surface-container:   var(--surface-container);
+  --color-surface-high:        var(--surface-high);
+  --color-surface-highest:     var(--surface-highest);
+  --color-surface-lowest:      var(--surface-lowest);
+  --color-on-surface:          var(--on-surface);
+  --color-on-surface-variant:  var(--on-surface-variant);
+  --color-on-primary:          var(--on-primary);
+  --color-tertiary:            var(--tertiary);
+  --color-outline-variant:     var(--outline-variant);
+  --color-status-eligible:     var(--status-eligible);
+  --color-status-partial:      var(--status-partial);
+  --color-status-excluded:     var(--status-excluded);
+
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-manrope);
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background: var(--surface);
+  color: var(--on-surface);
+  font-family: var(--font-inter), Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--outline-variant); border-radius: 99px; }
+
+/* Ghost border */
+.ghost-border {
+  border: 1px solid rgba(190, 201, 200, 0.15);
+}
+
+/* Glassmorphism */
+.glass {
+  background: rgba(255, 255, 255, 0.70);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.dark .glass {
+  background: rgba(20, 26, 26, 0.80);
+}
+
+/* Ambient shadow */
+.ambient-shadow {
+  box-shadow: 0px 12px 32px rgba(0, 80, 80, 0.06);
+}
+.dark .ambient-shadow {
+  box-shadow: 0px 12px 32px rgba(0, 0, 0, 0.30);
+}
+
+/* Primary gradient button */
+.btn-primary-gradient {
+  background: linear-gradient(135deg, #005050, #006a6a);
+}
+.dark .btn-primary-gradient {
+  background: linear-gradient(135deg, #006868, #008080);
+}
+
+/* Entity highlight */
+.entity-highlight {
+  background: rgba(132, 212, 211, 0.25);
+  color: var(--primary);
+  border-radius: 3px;
+  padding: 0 2px;
+}
