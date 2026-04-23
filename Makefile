@@ -1,5 +1,14 @@
 SHELL := /bin/bash
 
+# --- [ Colors ] ---------------------------------------------------------------
+BLUE   := \033[34m
+CYAN   := \033[36m
+GREEN  := \033[32m
+YELLOW := \033[33m
+RED    := \033[31m
+BOLD   := \033[1m
+NC     := \033[0m
+
 REASONING_DIR := agentic-reasoning
 ACQUISITION_DIR := data-acquisition
 INGESTION_DIR := data-ingestion
@@ -28,7 +37,8 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 
 .PHONY: help \
 	bootstrap validate up down serve serve-api serve-ui fetch ingest \
-	clean clean-all clean-artifacts clean-ocr clean-md clean-chunks clean-vectors clean-graph \
+	status benchmark-sepsis \
+	clean clean-all clean-artifacts clean-ocr clean-md clean-chunks clean-vectors clean-graph clean-hard \
 	ui-install ui-dev ui-build ui-start \
 	reasoning-install reasoning-clean reasoning-test reasoning-run reasoning-run-query \
 	reasoning-run-temporal reasoning-run-temporal-hitl reasoning-temporal-up reasoning-temporal-down \
@@ -47,30 +57,49 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	ingestion-clean ingestion-clean-all
 
 help: ## Show all root orchestration targets
-	@printf "\nUnified root control surface\n\n"
+	@printf "\n$(BOLD)Healthcare Platform — Unified Control Surface$(NC)\n\n"
 	@grep -E '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST) | sort | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-34s %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  $(CYAN)%-34s$(NC) %s\n", $$1, $$2}'
+	@printf "\n"
+
+status: ## Show running containers and data artifact counts
+	@printf "$(BOLD)--- Infrastructure ---$(NC)\n"
+	@docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep -E "qdrant|neo4j|temporal|postgres" || printf "  $(YELLOW)No platform containers running$(NC)\n"
+	@printf "\n$(BOLD)--- Storage Artifacts ---$(NC)\n"
+	@printf "  PDFs:   %s\n" "$$(find data/pdfs -type f -name '*.pdf' 2>/dev/null | wc -l | xargs)"
+	@printf "  OCR:    %s\n" "$$(find data/artifacts/extract -type f 2>/dev/null | wc -l | xargs)"
+	@printf "  Chunks: %s\n" "$$(find data/artifacts/chunk -type f 2>/dev/null | wc -l | xargs)"
+	@printf "\n$(BOLD)--- LM Studio ---$(NC)\n"
+	@curl -s http://localhost:1234/v1/models 2>/dev/null | python3 -c \
+		"import sys, json; m=json.load(sys.stdin); [print('  ' + x['id']) for x in m.get('data',[])]" \
+		|| printf "  $(YELLOW)LM Studio not running$(NC)\n"
 
 bootstrap: ## Bootstrap Python and Node dependencies
 	@./scripts/bootstrap.sh
 
 validate: ## Check env file, LM Studio, Qdrant, and Neo4j connectivity
 	@bash -c 'set -euo pipefail; \
-		test -f .env.local || { echo "FAIL: missing .env.local"; exit 1; }; \
+		test -f .env.local || { printf "$(RED)FAIL: missing .env.local$(NC)\n"; exit 1; }; \
 		set -a; source .env.local; set +a; \
 		LM_STUDIO_URL="$${LM_STUDIO_BASE_URL:-http://localhost:1234/v1}"; \
 		QDRANT_ADDR="$${QDRANT_URL:-http://localhost:6333}"; \
 		NEO4J_BOLT="$${NEO4J_URI:-bolt://localhost:7687}"; \
-		echo "Checking LM Studio at $$LM_STUDIO_URL"; \
-		curl --fail --silent "$$LM_STUDIO_URL/models" >/dev/null && echo "  LM Studio OK" || { echo "  FAIL: LM Studio not reachable"; exit 1; }; \
-		echo "Checking Qdrant at $$QDRANT_ADDR"; \
-		curl --fail --silent "$$QDRANT_ADDR/collections" >/dev/null && echo "  Qdrant OK" || { echo "  FAIL: Qdrant not reachable"; exit 1; }; \
-		echo "Checking Neo4j at $$NEO4J_BOLT"; \
+		printf "Checking LM Studio at $$LM_STUDIO_URL\n"; \
+		curl --fail --silent "$$LM_STUDIO_URL/models" >/dev/null \
+			&& printf "  $(GREEN)LM Studio OK$(NC)\n" \
+			|| { printf "  $(RED)FAIL: LM Studio not reachable$(NC)\n"; exit 1; }; \
+		printf "Checking Qdrant at $$QDRANT_ADDR\n"; \
+		curl --fail --silent "$$QDRANT_ADDR/collections" >/dev/null \
+			&& printf "  $(GREEN)Qdrant OK$(NC)\n" \
+			|| { printf "  $(RED)FAIL: Qdrant not reachable$(NC)\n"; exit 1; }; \
+		printf "Checking Neo4j at $$NEO4J_BOLT\n"; \
 		NEO4J_HOST=$$(echo "$$NEO4J_BOLT" | sed "s|.*://||" | cut -d: -f1); \
 		NEO4J_PORT=$$(echo "$$NEO4J_BOLT" | sed "s|.*://||" | cut -d: -f2 | cut -d/ -f1); \
 		NEO4J_PORT="$${NEO4J_PORT:-7687}"; \
-		nc -z -w 3 "$$NEO4J_HOST" "$$NEO4J_PORT" && echo "  Neo4j OK at $$NEO4J_HOST:$$NEO4J_PORT" || { echo "  FAIL: Neo4j not reachable at $$NEO4J_HOST:$$NEO4J_PORT"; exit 1; }; \
-		echo "All checks passed"; \
+		nc -z -w 3 "$$NEO4J_HOST" "$$NEO4J_PORT" \
+			&& printf "  $(GREEN)Neo4j OK at $$NEO4J_HOST:$$NEO4J_PORT$(NC)\n" \
+			|| { printf "  $(RED)FAIL: Neo4j not reachable at $$NEO4J_HOST:$$NEO4J_PORT$(NC)\n"; exit 1; }; \
+		printf "$(GREEN)$(BOLD)All checks passed$(NC)\n"; \
 	'
 
 up: ## Start shared infrastructure and API/UI services
@@ -103,35 +132,66 @@ ui-start: ## Build (if needed) and start the Next.js UI in production mode
 
 fetch: acquisition-fetch ## Fetch PDFs via data-acquisition
 
-ingest: ingestion-run ## Run the ingestion pipeline
+ingest: ## Run ingestion pipeline then build knowledge graph (N=<max-pdfs>)
+	@printf "$(BLUE)Starting Ingestion Pipeline (N=$(N))...$(NC)\n"
+	@cd $(INGESTION_DIR) && \
+		python3 scripts/run_pipeline.py --config ../$(CONFIG_FILE) --max-pdfs "$(N)" --skip-graph $(if $(SKIP),--skip-$(SKIP),)
+	@printf "$(BLUE)Building Neo4j knowledge graph...$(NC)\n"
+	@$(MAKE) --no-print-directory ingestion-neo4j-build
+	@printf "$(GREEN)$(BOLD)Ingestion complete.$(NC)\n"
+
+benchmark-sepsis: ## Run the Sepsis Falsification paper through the full pipeline and query agent
+	@SPDF=$$(find data/pdfs -name "sepsis_falsification.pdf" -type f 2>/dev/null | head -1); \
+	 test -n "$$SPDF" || { printf "$(RED)FAIL: sepsis_falsification.pdf not found under data/pdfs/$(NC)\n"; exit 1; }; \
+	 mkdir -p data/pdfs/benchmarks; \
+	 cp "$$SPDF" data/pdfs/benchmarks/sepsis_falsification.pdf; \
+	 printf "$(YELLOW)Running Falsification Benchmark on Sepsis Models...$(NC)\n"; \
+	 cd $(INGESTION_DIR) && python3 scripts/run_pipeline.py --config ../$(CONFIG_FILE) \
+		--input-dir ../data/pdfs/benchmarks --skip-graph
+	@$(MAKE) --no-print-directory ingestion-neo4j-build
+	@$(MAKE) --no-print-directory reasoning-run-query \
+		QUERY="Analyze the care-process intensity vs biological signal findings in this paper."
 
 clean: ingestion-clean ## Remove generated caches and logs
 
 clean-all: ingestion-clean-all ## Remove ingestion outputs and caches
 
+clean-hard: ## Wipe ALL state — artifacts, vectors, graph (use with caution)
+	@printf "$(RED)$(BOLD)Wiping all state...$(NC)\n"
+	@$(MAKE) --no-print-directory clean-artifacts
+	@$(MAKE) --no-print-directory clean-vectors
+	@$(MAKE) --no-print-directory clean-graph
+	@printf "$(GREEN)State reset to zero.$(NC)\n"
+
 clean-artifacts: ## Remove all generated repo-wide artifacts
-	@rm -rf data/*.pdf data/processed/*.md data/processed/*.json data/processed/*.chunks.json 2>/dev/null || true
-	@rm -rf log/*.json log/*.jsonl 2>/dev/null || true
+	@rm -rf data/artifacts/extract data/artifacts/convert data/artifacts/clean \
+		data/artifacts/chunk data/artifacts/ingestion.log 2>/dev/null || true
 	@find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	@echo "Cleaned generated artifacts"
 
 clean-ocr: ## Remove OCR outputs
-	@rm -rf data-ingestion/data/ocr/* 2>/dev/null || true
+	@rm -rf data/artifacts/extract/* 2>/dev/null || true
 
 clean-md: ## Remove markdown and cleaned outputs
-	@rm -rf data-ingestion/data/markdown/* data-ingestion/data/cleaned/* 2>/dev/null || true
+	@rm -rf data/artifacts/convert/* data/artifacts/clean/* 2>/dev/null || true
 
 clean-chunks: ## Remove chunk outputs
-	@rm -rf data-ingestion/data/chunks/* 2>/dev/null || true
+	@rm -rf data/artifacts/chunk/* 2>/dev/null || true
 
 clean-vectors: ## Delete the Qdrant collection defined in config/app.yaml
-	@bash -c 'set -euo pipefail; \
+	@bash -c ' \
 		set -a; test -f .env.local && source .env.local; set +a; \
 		QDRANT_URL_VALUE="$${QDRANT_URL:-http://localhost:6333}"; \
-		COLLECTION_NAME="$$(python3 -c '"'"'"'"'"'"'"'"'import yaml; print(yaml.safe_load(open("config/app.yaml", "r", encoding="utf-8"))["data_ingestion"]["vectorization"]["collection_name"])'"'"'"'"'"'"'"'"')"; \
-		curl --fail --silent --request DELETE "$$QDRANT_URL_VALUE/collections/$$COLLECTION_NAME" >/dev/null; \
-		echo "Deleted Qdrant collection $$COLLECTION_NAME"; \
+		COLLECTION_NAME="$$(python3 -c '"'"'import yaml; print(yaml.safe_load(open("config/app.yaml"))["data_ingestion"]["vectorization"]["collection_name"])'"'"')"; \
+		STATUS=$$(curl --silent --output /dev/null --write-out "%{http_code}" --request DELETE "$$QDRANT_URL_VALUE/collections/$$COLLECTION_NAME"); \
+		if [ "$$STATUS" = "200" ]; then \
+			printf "$(GREEN)Deleted Qdrant collection: $$COLLECTION_NAME$(NC)\n"; \
+		elif [ "$$STATUS" = "404" ]; then \
+			printf "$(YELLOW)Collection already absent: $$COLLECTION_NAME$(NC)\n"; \
+		else \
+			printf "$(RED)Unexpected status $$STATUS deleting $$COLLECTION_NAME$(NC)\n"; exit 1; \
+		fi; \
 	'
 
 clean-graph: ingestion-neo4j-delete ## Delete all Neo4j graph data
@@ -308,9 +368,9 @@ ingestion-compare-runs: ## Compare two executions for DOC=<uuid> EXEC1=<uuid> EX
 ingestion-clean: ## Remove ingestion caches and logs
 	@cd $(INGESTION_DIR) && \
 		find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true && \
-		find . -type f -name "*.pyc" -delete 2>/dev/null || true && \
-		rm -f logs/*.log 2>/dev/null || true
+		find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	@rm -f data/artifacts/ingestion.log 2>/dev/null || true
 
 ingestion-clean-all: ingestion-clean ## Remove all ingestion data outputs
-	@rm -rf $(INGESTION_DIR)/data/raw/* $(INGESTION_DIR)/data/ocr/* $(INGESTION_DIR)/data/markdown/* \
-		$(INGESTION_DIR)/data/cleaned/* $(INGESTION_DIR)/data/chunks/* 2>/dev/null || true
+	@rm -rf data/artifacts/extract data/artifacts/convert data/artifacts/clean \
+		data/artifacts/chunk 2>/dev/null || true

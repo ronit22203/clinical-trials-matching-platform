@@ -13,10 +13,10 @@ data_ingestion:
   input_dir: ../data/pdfs
   log_file: ../data/artifacts/ingestion.log
   output:
-    ocr_dir: ../data/artifacts/ocr
-    markdown_dir: ../data/artifacts/markdown
-    cleaned_dir: ../data/artifacts/cleaned
-    chunks_dir: ../data/artifacts/chunks
+    ocr_dir: ../data/artifacts/extract
+    markdown_dir: ../data/artifacts/convert
+    cleaned_dir: ../data/artifacts/clean
+    chunks_dir: ../data/artifacts/chunk
   ocr:
     langs:
     - en
@@ -24,9 +24,9 @@ data_ingestion:
     det_batch_size: 2
     rec_batch_size: 16
     image_scale: 2
-    output_dir: ../data/artifacts/ocr
+    output_dir: ../data/artifacts/extract
     confidence_threshold: 0.8
-    save_debug_images: false
+    save_debug_images: true
     max_pages: null
   conversion:
     infer_headers: true
@@ -43,13 +43,11 @@ data_ingestion:
     fail_safe_on_pii_error: true
     language: en
     pii_entities:
-    - PHONE_NUMBER
     - EMAIL_ADDRESS
     - SG_NRIC
     pii_replacements:
       DEFAULT: <REDACTED>
       EMAIL_ADDRESS: <EMAIL>
-      PHONE_NUMBER: <PHONE>
       SG_NRIC: <NRIC_ID>
     custom_recognizers:
     - entity: SG_NRIC
@@ -80,11 +78,12 @@ data_ingestion:
     database: neo4j
   knowledge_graph:
     enabled: true
-    model: cniongolo/biomistral:latest
-    ollama_url: ${OLLAMA_BASE_URL}/api/generate
+    model: qwen3-8b
+    chat_url: ${LM_STUDIO_BASE_URL}/chat/completions
     max_retries: 2
-    timeout_seconds: 120
-    max_text_chars: 2000
+    timeout_seconds: 180
+    max_tokens: 768
+    max_text_chars: 1500
     min_chunk_chars: 50
   retrieval:
     default_limit: 3
@@ -789,8 +788,8 @@ data_acquisition:
 agentic_reasoning:
   defaults:
     default_agent: local_assistant
-    model: lmstudio/lmstudio-community/Qwen2.5-7B-Instruct-GGUF
-    embed_model: nomic-embed-text:latest
+    model: lmstudio/qwen3-8b
+    embed_model: text-embedding-nomic-embed-text-v1.5
     max_tokens: 4096
     temperature: 0.1
     tools_enabled:
@@ -799,7 +798,7 @@ agentic_reasoning:
   agents:
     assistant:
       name: Clinical Research Assistant
-      model: ollama/qwen3:1.7b
+      model: lmstudio/qwen3-8b
       system_prompt: "You are a clinical research assistant with access to five specialized\
         \ tools. Use them based on the nature of the request, not keyword matching.\n\
         Tool guidance: - fda_adverse_events: drug safety data, adverse event reports,\
@@ -830,7 +829,7 @@ agentic_reasoning:
       - name: mcp_filesystem
     local_assistant:
       name: Local Clinical Research Assistant
-      model: lmstudio/lmstudio-community/Qwen2.5-7B-Instruct-GGUF
+      model: lmstudio/qwen3-8b
       system_prompt: "You are a clinical research assistant with access to a local\
         \ knowledge base and filesystem tools. All operations run locally \u2014 no\
         \ external APIs required.\nTool guidance: - graphrag: search internal medical\
@@ -849,14 +848,12 @@ agentic_reasoning:
         top_p: 0.9
         frequency_penalty: 0.0
         presence_penalty: 0.0
-        response_format:
-          type: json_object
       tools:
       - name: graphrag
       - name: mcp_filesystem
     mcp_test:
       name: mcp_test_agent
-      model: ollama/qwen3:1.7b
+      model: lmstudio/qwen3-8b
       system_prompt: 'You are an assistant that can access the local filesystem via
         MCP.
 

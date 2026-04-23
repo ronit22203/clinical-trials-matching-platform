@@ -2,56 +2,70 @@
 
 import { FileText, Code2, ListOrdered, BookMarked, Terminal, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { ExecutionLog } from "@/lib/types/audit";
 
-const ARTIFACTS = [
-  {
-    id: "record",
-    title: "Patient Record",
-    subtitle: "VasquezNewton_990219.pdf",
-    icon: FileText,
-    tag: "PDF",
-    tagClass: "bg-[rgba(0,80,80,0.08)] text-primary",
-    action: "View",
-  },
-  {
-    id: "profile",
-    title: "Clinical Profile",
-    subtitle: "Extracted JSON — 10 attributes",
-    icon: Code2,
-    tag: "JSON",
-    tagClass: "bg-[rgba(0,73,125,0.08)] text-tertiary",
-    action: "Inspect",
-  },
-  {
-    id: "matches",
-    title: "Trial Matches",
-    subtitle: "5 trials ranked by eligibility score",
-    icon: ListOrdered,
-    tag: "Ranked",
-    tagClass: "bg-[rgba(22,163,74,0.08)] text-status-eligible",
-    action: "View",
-  },
-  {
-    id: "evidence",
-    title: "Evidence Pack",
-    subtitle: "5 citations · 3 sources",
-    icon: BookMarked,
-    tag: "Citations",
-    tagClass: "bg-[rgba(132,212,211,0.2)] text-primary",
-    action: "Browse",
-  },
-  {
-    id: "logs",
-    title: "Execution Logs",
-    subtitle: "Run a3f91bc · 4.2s · 3 tools",
-    icon: Terminal,
-    tag: "JSONL",
-    tagClass: "bg-surface-highest text-on-surface-variant",
-    action: "Inspect",
-  },
-];
+interface CaseArtifactsProps {
+  executionLog?: ExecutionLog | null;
+  citationCount?: number;
+}
 
-export default function CaseArtifacts() {
+export default function CaseArtifacts({ executionLog, citationCount = 0 }: CaseArtifactsProps) {
+  const runLabel = executionLog
+    ? `Run ${executionLog.executionId.slice(0, 7)} · ${(executionLog.latencyMs / 1000).toFixed(1)}s · ${executionLog.toolsCalled.length} tools`
+    : "Run a3f91bc · 4.2s · 3 tools";
+
+  const evidenceLabel = executionLog && citationCount > 0
+    ? `${citationCount} citation${citationCount !== 1 ? "s" : ""} · ${executionLog.toolsCalled.length} source${executionLog.toolsCalled.length !== 1 ? "s" : ""}`
+    : "5 citations · 3 sources";
+
+  const ARTIFACTS = [
+    {
+      id: "record",
+      title: "Patient Record",
+      subtitle: "VasquezNewton_990219.pdf",
+      icon: FileText,
+      tag: "PDF",
+      tagClass: "bg-[rgba(0,80,80,0.08)] text-primary",
+      action: "View",
+    },
+    {
+      id: "profile",
+      title: "Clinical Profile",
+      subtitle: "Extracted JSON — 10 attributes",
+      icon: Code2,
+      tag: "JSON",
+      tagClass: "bg-[rgba(0,73,125,0.08)] text-tertiary",
+      action: "Inspect",
+    },
+    {
+      id: "matches",
+      title: "Trial Matches",
+      subtitle: "5 trials ranked by eligibility score",
+      icon: ListOrdered,
+      tag: "Ranked",
+      tagClass: "bg-[rgba(22,163,74,0.08)] text-status-eligible",
+      action: "View",
+    },
+    {
+      id: "evidence",
+      title: "Evidence Pack",
+      subtitle: evidenceLabel,
+      icon: BookMarked,
+      tag: "Citations",
+      tagClass: "bg-[rgba(132,212,211,0.2)] text-primary",
+      action: "Browse",
+    },
+    {
+      id: "logs",
+      title: "Execution Logs",
+      subtitle: runLabel,
+      icon: Terminal,
+      tag: "JSONL",
+      tagClass: executionLog ? "bg-[rgba(0,80,80,0.08)] text-primary" : "bg-surface-highest text-on-surface-variant",
+      action: "Inspect",
+    },
+  ] as const;
+
   return (
     <section className="px-6 py-4">
       <h2
@@ -70,7 +84,6 @@ export default function CaseArtifacts() {
               "hover:shadow-[0_8px_24px_rgba(0,80,80,0.09)] transition-shadow"
             )}
           >
-            {/* Icon + tag */}
             <div className="flex items-start justify-between">
               <div className="w-9 h-9 rounded-xl bg-surface-container flex items-center justify-center">
                 <Icon className="w-4 h-4 text-on-surface-variant" />
@@ -80,7 +93,6 @@ export default function CaseArtifacts() {
               </span>
             </div>
 
-            {/* Text */}
             <div>
               <p className="text-sm font-semibold text-on-surface" style={{ fontFamily: "var(--font-manrope)" }}>
                 {title}
@@ -88,7 +100,6 @@ export default function CaseArtifacts() {
               <p className="text-xs text-on-surface-variant mt-0.5 leading-relaxed">{subtitle}</p>
             </div>
 
-            {/* Action */}
             <button className="mt-auto flex items-center gap-1 text-xs font-medium text-primary opacity-0 group-hover:opacity-100 transition-opacity">
               {action}
               <ArrowRight className="w-3 h-3" />

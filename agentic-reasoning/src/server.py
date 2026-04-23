@@ -15,6 +15,7 @@ Start with:
 
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,15 @@ except ImportError:
     _registry_available = False
 
 logger = logging.getLogger(__name__)
+
+# ── Output sanitization ────────────────────────────────────────────────────────
+
+def _sanitize_output(text: str) -> str:
+    """Strip Qwen3 chain-of-thought tags from agent synthesis before returning."""
+    text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
+    text = text.replace("<think>", "").replace("</think>", "")
+    return text.strip()
+
 
 # ── Application ───────────────────────────────────────────────────────────────
 
@@ -208,7 +218,7 @@ async def query_agent(request: QueryRequest) -> QueryResponse:
     agent = SimpleAgent(agent_config, tool_registry=registry)
 
     try:
-        synthesis = agent.run_parallel(request.query)
+        synthesis = _sanitize_output(await agent.run_parallel(request.query))
     except Exception as exc:
         logger.error("Agent execution failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Agent error: {exc}") from exc

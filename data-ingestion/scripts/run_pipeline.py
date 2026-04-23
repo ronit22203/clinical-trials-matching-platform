@@ -111,14 +111,14 @@ class MedicalDataPipeline:
         self.logger = PipelineLogger.setup(str(self.log_file), config=self.config)
         
         # Resolve paths from config - organized logically
-        self.input_dir = self._resolve_path(self.config.get('input_dir', 'data/raw'))
+        self.input_dir = self._resolve_path(self.config.get('input_dir', '../data/pdfs'))
         
         # Processing stages from config.output
         output_config = self.config.get('output', {})
-        self.ocr_dir = self._resolve_path(output_config.get('ocr_dir', 'data/ocr'))
-        self.markdown_dir = self._resolve_path(output_config.get('markdown_dir', 'data/markdown'))
-        self.cleaned_dir = self._resolve_path(output_config.get('cleaned_dir', 'data/cleaned'))
-        self.chunks_dir = self._resolve_path(output_config.get('chunks_dir', 'data/chunks'))
+        self.ocr_dir = self._resolve_path(output_config.get('ocr_dir', '../data/artifacts/extract'))
+        self.markdown_dir = self._resolve_path(output_config.get('markdown_dir', '../data/artifacts/convert'))
+        self.cleaned_dir = self._resolve_path(output_config.get('cleaned_dir', '../data/artifacts/clean'))
+        self.chunks_dir = self._resolve_path(output_config.get('chunks_dir', '../data/artifacts/chunk'))
         
         # Create all necessary directories
         for directory in [self.input_dir, self.ocr_dir, self.markdown_dir,
@@ -557,7 +557,7 @@ Examples:
   python scripts/run_pipeline.py --max-pdfs 2             # Process first 2 PDFs only
   python scripts/run_pipeline.py --skip-ocr               # Skip OCR (use existing artifacts)
   python scripts/run_pipeline.py --skip-graph             # Skip Neo4j stage
-  python scripts/run_pipeline.py --input-dir data/raw     # Override input dir
+  python scripts/run_pipeline.py --input-dir ../data/pdfs   # Override input dir
         """
     )
     

@@ -19,13 +19,6 @@ export default function ReasoningTrace({ executionLog }: ReasoningTraceProps) {
   }
 
   const toolsCalled = executionLog.toolsCalled;
-  const entities = ["EGFR_Exon19Del", "Osimertinib", "Adenocarcinoma_NSCLC", "NSCLC_StageIIIB"];
-  const retrievalPath = [
-    { step: "Query encoding", detail: "qwen3:1.7b → 312 tokens" },
-    { step: "Vector search (Qdrant)", detail: "5 hits · BGE-small-en-v1.5" },
-    { step: "Graph traversal (Neo4j)", detail: "depth 2 · 347 edges" },
-    { step: "Re-ranking", detail: "cross-encoder · top 5 returned" },
-  ];
 
   return (
     <div className="space-y-4">
@@ -61,33 +54,52 @@ export default function ReasoningTrace({ executionLog }: ReasoningTraceProps) {
         </div>
       </div>
 
-      {/* Retrieval path */}
+      {/* Retrieval path — derived from audit entries if available */}
       <div>
         <p className="text-[10px] uppercase tracking-widest text-on-surface-variant mb-2">
           Retrieval Path
         </p>
         <div className="space-y-1">
-          {retrievalPath.map(({ step, detail }, i) => (
-            <div key={i} className="flex items-start gap-2">
-              <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-primary-fixed-dim shrink-0" />
-              <div>
-                <span className="text-xs font-medium text-on-surface">{step}</span>
-                <span className="text-xs text-on-surface-variant ml-1.5">{detail}</span>
-              </div>
-            </div>
-          ))}
+          {executionLog.entries.length > 0
+            ? executionLog.entries.map((entry, i) => (
+                <div key={entry.id ?? i} className="flex items-start gap-2">
+                  <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-primary-fixed-dim shrink-0" />
+                  <div>
+                    <span className="text-xs font-medium text-on-surface">{entry.label}</span>
+                    {entry.durationMs !== undefined && (
+                      <span className="text-xs text-on-surface-variant ml-1.5">
+                        {entry.durationMs}ms
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            : [
+                { step: "Query encoding", detail: "embedding model → tokens" },
+                { step: "Vector search (Qdrant)", detail: "BGE-small-en-v1.5" },
+                { step: "Graph traversal (Neo4j)", detail: "depth 2 traversal" },
+                { step: "Re-ranking", detail: "cross-encoder · top hits returned" },
+              ].map(({ step, detail }, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <div className="mt-1.5 w-1.5 h-1.5 rounded-full bg-primary-fixed-dim shrink-0" />
+                  <div>
+                    <span className="text-xs font-medium text-on-surface">{step}</span>
+                    <span className="text-xs text-on-surface-variant ml-1.5">{detail}</span>
+                  </div>
+                </div>
+              ))}
         </div>
       </div>
 
-      {/* Key entities */}
+      {/* Key entities — derived from toolsCalled, not hardcoded */}
       <div>
         <p className="text-[10px] uppercase tracking-widest text-on-surface-variant mb-2">
-          Key Entities Matched
+          Tools Invoked
         </p>
         <div className="flex flex-wrap gap-1.5">
-          {entities.map((e) => (
-            <span key={e} className="entity-highlight text-xs px-1.5 py-0.5 font-medium">
-              {e}
+          {toolsCalled.map((t) => (
+            <span key={t} className="entity-highlight text-xs px-1.5 py-0.5 font-medium">
+              {t}
             </span>
           ))}
         </div>

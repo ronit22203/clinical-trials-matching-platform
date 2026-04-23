@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).parent.parent
+REPO_ROOT = PROJECT_ROOT.parent
 
 def format_size(bytes_val):
     """Format bytes to human readable size"""
@@ -25,7 +26,7 @@ def inspect_stage_1():
     print("STAGE 1: OCR (PDF → OCR JSON)")
     print("="*70)
     
-    stage1_dir = PROJECT_ROOT / "data" / "ocr"
+    stage1_dir = REPO_ROOT / "data" / "artifacts" / "ocr"
     
     if not stage1_dir.exists():
         print("Stage 1 directory not found")
@@ -75,7 +76,7 @@ def inspect_stage_2():
     print("STAGE 2: CONVERT (OCR JSON → Markdown)")
     print("="*70)
     
-    stage2_dir = PROJECT_ROOT / "data" / "markdown"
+    stage2_dir = REPO_ROOT / "data" / "artifacts" / "markdown"
     
     if not stage2_dir.exists():
         print("Stage 2 directory not found")
@@ -122,7 +123,7 @@ def inspect_stage_3():
     print("STAGE 3: CLEAN (Markdown → Cleaned)")
     print("="*70)
     
-    stage3_dir = PROJECT_ROOT / "data" / "cleaned"
+    stage3_dir = REPO_ROOT / "data" / "artifacts" / "cleaned"
     
     if not stage3_dir.exists():
         print("Stage 3 directory not found")
@@ -146,7 +147,7 @@ def inspect_stage_3():
             
             # Compare with converted
             converted_name = md_file.name.replace('_cleaned', '_converted')
-            converted_file = PROJECT_ROOT / "data" / "stage2_converted" / converted_name
+            converted_file = REPO_ROOT / "data" / "artifacts" / "markdown" / converted_name
             
             if converted_file.exists():
                 with open(converted_file, 'r', encoding='utf-8') as f:
@@ -172,7 +173,7 @@ def inspect_stage_4():
     print("STAGE 4: CHUNK (Markdown → Chunks)")
     print("="*70)
     
-    stage4_dir = PROJECT_ROOT / "data" / "chunks"
+    stage4_dir = REPO_ROOT / "data" / "artifacts" / "chunks"
     
     if not stage4_dir.exists():
         print("Stage 4 directory not found")
@@ -247,15 +248,15 @@ def print_summary():
     print("="*70)
     
     stages = [
-        ("Stage 1: OCR",       "data/ocr", "*_ocr.json"),
-        ("Stage 2: Markdown",  "data/markdown", "*_converted.md"),
-        ("Stage 3: Cleaned",   "data/cleaned", "*_cleaned.md"),
-        ("Stage 4: Chunks",    "data/chunks", "*_chunks.json"),
+        ("Stage 1: Extract",   "data/artifacts/extract", "*_ocr.json"),
+        ("Stage 2: Convert",   "data/artifacts/convert", "*_converted.md"),
+        ("Stage 3: Clean",     "data/artifacts/clean",   "*_cleaned.md"),
+        ("Stage 4: Chunk",     "data/artifacts/chunk",   "*_chunks.json"),
     ]
     
     print("\nData flow:")
     for stage_name, path, pattern in stages:
-        stage_dir = PROJECT_ROOT / path
+        stage_dir = REPO_ROOT / path
         if stage_dir.exists():
             files = list(stage_dir.glob(pattern))
             status = f"✓ {len(files)} file(s)"

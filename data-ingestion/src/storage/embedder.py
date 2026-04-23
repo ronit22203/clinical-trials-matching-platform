@@ -156,7 +156,7 @@ class MedicalVectorizer:
         if input_dir_path is None:
             vec_config = self.config.get('vectorization', {})
             # Use interim directory (where markdown files are after extraction)
-            input_dir_path = self._resolve_path(vec_config.get('input_dir', 'data/interim'))
+            input_dir_path = self._resolve_path(vec_config.get('input_dir', '../data/artifacts/clean'))
         
         input_dir_path = Path(input_dir_path)
         if not input_dir_path.exists():

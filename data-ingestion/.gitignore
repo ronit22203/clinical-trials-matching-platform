@@ -45,18 +45,6 @@ venv.bak/
 .pydevproject
 .settings/
 
-# Data (large files) - keep structure, ignore contents
-data/raw/**/*
-data/ocr/**/*
-data/markdown/**/*
-data/cleaned/**/*
-data/chunks/**/*
-!data/raw/.gitkeep
-!data/ocr/.gitkeep
-!data/markdown/.gitkeep
-!data/cleaned/.gitkeep
-!data/chunks/.gitkeep
-
 # Logs
 logs/**/*
 *.log

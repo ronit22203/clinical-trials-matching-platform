@@ -5,6 +5,8 @@ Captures full execution fingerprints and enables comparison between runs.
 Architecture:
   - SQLite DB (data/determinism.db): documents, executions, stage_records tables
   - Content-addressable storage (data/artifacts/): large intermediate outputs
+
+Both paths resolve to the repo-root data/ directory (single source of truth).
 """
 
 import hashlib
@@ -19,8 +21,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 PROJECT_ROOT = Path(__file__).parent.parent
-DB_PATH = PROJECT_ROOT / "data" / "determinism.db"
-ARTIFACTS_DIR = PROJECT_ROOT / "data" / "artifacts"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DB_PATH = REPO_ROOT / "data" / "determinism.db"
+ARTIFACTS_DIR = REPO_ROOT / "data" / "artifacts"
 
 
 def document_uuid(filename: str) -> str:

@@ -145,13 +145,17 @@ class SimpleAgent:
             except Exception:
                 pass
 
-    def run_parallel(self, query: str) -> str:
+    async def run_parallel(self, query: str) -> str:
         """Fan out all configured tool calls concurrently, then synthesize with the LLM.
 
         Bypasses the LangGraph ReAct loop — all tools run at once via asyncio.gather
         (each sync execute() is offloaded to a thread). Suitable when every configured
         tool is relevant to the query, mirroring ClinicalResearchWorkflow without Temporal.
         Falls back to run() if no tools are configured.
+
+        Must be awaited — use ``await agent.run_parallel(query)`` from async callers
+        (e.g. FastAPI endpoints). Calling asyncio.run() here would conflict with the
+        event loop already running inside uvicorn/FastAPI.
         """
         if not self.tool_registry or not self.config.tools:
             return self.run(query)
@@ -159,19 +163,16 @@ class SimpleAgent:
         self.metrics = ExecutionMetrics(self.config)
         self.metrics.start_time = time.time()
 
-        async def _gather() -> dict[str, str]:
-            async def _call(name: str, instance) -> tuple[str, str]:
-                result = await asyncio.to_thread(instance.cached_execute, query)
-                return name, str(result)
+        async def _call(name: str, instance) -> tuple[str, str]:
+            result = await asyncio.to_thread(instance.cached_execute, query)
+            return name, str(result)
 
-            tasks = [
-                _call(tc.name, self.tool_registry.get_tool(tc.name))
-                for tc in self.config.tools
-                if self.tool_registry.get_tool(tc.name)
-            ]
-            return dict(await asyncio.gather(*tasks))
-
-        tool_results = asyncio.run(_gather())
+        tasks = [
+            _call(tc.name, self.tool_registry.get_tool(tc.name))
+            for tc in self.config.tools
+            if self.tool_registry.get_tool(tc.name)
+        ]
+        tool_results = dict(await asyncio.gather(*tasks))
         self.metrics.tools_called = list(tool_results.keys())
         self.metrics.tool_responses = tool_results
 

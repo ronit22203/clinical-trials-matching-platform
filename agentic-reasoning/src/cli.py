@@ -1,4 +1,5 @@
 # src/cli.py
+import asyncio
 import logging
 import os
 import sys
@@ -106,7 +107,7 @@ def main(agent, tools_dir, log_dir, use_temporal, human_in_loop, parallel, query
                     continue
                 if parallel:
                     with console.status("[dim]Fetching tools in parallel…[/dim]", spinner="dots"):
-                        response = agent_instance.run_parallel(query)
+                        response = asyncio.run(agent_instance.run_parallel(query))
                     console.print(Markdown(f"**Agent:** {response}"))
                     metrics = agent_instance.metrics
                     if metrics.latency_ms:
@@ -119,7 +120,7 @@ def main(agent, tools_dir, log_dir, use_temporal, human_in_loop, parallel, query
     else:
         if parallel:
             with console.status("[dim]Fetching tools in parallel…[/dim]", spinner="dots"):
-                response = agent_instance.run_parallel(query)
+                response = asyncio.run(agent_instance.run_parallel(query))
             console.print(Markdown(response))
             _log_execution(agent_instance, query, response, logger)
         else:
