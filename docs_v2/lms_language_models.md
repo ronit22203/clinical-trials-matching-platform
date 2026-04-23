@@ -1,70 +1,68 @@
 
-### The Strategy: One Model, Two Use Cases
+# LM Studio Language Model Selection
 
-> *"Can we use it for strict entity-relationship extraction AND agent language model?"*
+## Strategy: One Model, Two Use Cases
 
-**Yes—but you need the right architecture.**
+The platform requires two distinct inference capabilities:
 
 | Use Case | Requirement | Model Type |
 | :--- | :--- | :--- |
 | **Entity-Relation Extraction (NER)** | Precision, BioBERT-level accuracy, structured output | Encoder or fine-tuned decoder |
 | **Agent Language Model** | Reasoning, tool calling, conversation, instruction following | General-purpose instruct/chat model |
 
-**The truth:** One model *can* do both, but you'll trade off NER precision if you use a general chat model, or you'll lose reasoning if you use a pure NER model.
+A single model can serve both roles, but combining them introduces trade-offs: general chat models sacrifice NER precision, while pure NER models lack the reasoning capacity required for agentic workflows.
 
 ---
 
-### The Optimal Choice for Your Stack
+## Architecture Decision
 
-Given your platform (`clinical-graphrag-agents`) has **separate components**:
+The platform (`clinical-graphrag-agents`) separates these concerns into distinct components:
 
 - `entity_extractor.py` uses **BioBERT** for NER
-- Agents use a general LLM for reasoning/tool calling
+- The agent layer uses a general-purpose LLM for reasoning and tool orchestration
 
-**You already have the right architecture.** You don't need the LLM to do NER—you need the LLM to be the **agent brain** that:
+This separation is intentional. The LLM acts as the **agent brain** responsible for:
 
-- Understands clinical queries
-- Decides which tools to call (`pubmed_search`, `fda_adverse_events`, `graphrag_search`)
-- Synthesizes responses from retrieved data
-- Follows your YAML-defined system prompt
+- Interpreting clinical queries
+- Selecting tools (`pubmed_search`, `fda_adverse_events`, `graphrag_search`)
+- Synthesising responses from retrieved data
+- Following the YAML-defined system prompt
 
 ---
 
-### The Model I'd Pick Right Now
+## Model Selection
 
-From your filtered list, here's the breakdown:
-
-| Model | Verdict | Why |
+| Model | Verdict | Rationale |
 | :--- | :--- | :--- |
-| **BioMistral-Clinical-7B** | ✅ **Strong candidate** | Mistral-based, clinical fine-tune, good reasoning + domain knowledge. |
-| **Medical-Llama3-8B** | ✅ **Solid choice** | Llama 3 architecture, medical fine-tune, strong instruction following. |
-| **phi-3-clinical** | ⚠️ Smaller (3.8B) | Faster, lower VRAM, but less reasoning depth. |
-| **ClinicalGPT-*** | ⚠️ Older base | May lack instruction tuning for agentic workflows. |
+| **BioMistral-Clinical-7B** | ✅ **Recommended** | Mistral-based, clinical fine-tune, strong reasoning and domain knowledge |
+| **Medical-Llama3-8B** | ✅ Solid alternative | Llama 3 architecture, medical fine-tune, strong instruction following |
+| **phi-3-clinical** | ⚠️ Smaller (3.8B) | Faster and lower VRAM, but reduced reasoning depth |
+| **ClinicalGPT-*** | ⚠️ Older base | May lack instruction tuning for agentic tool-calling workflows |
 
 ---
 
-### Execute This
+## Installation
 
 ```bash
-# Download the top candidate
+# Download the recommended model
 lms get MaziyarPanahi/BioMistral-Clinical-7B-GGUF
 
-# Or if you prefer Llama 3
+# Alternative: Llama 3 base
 lms get ruslanmv/Medical-Llama3-8B-GGUF
 ```
 
 ---
 
-### How Your Platform Will Use It
+## Agent Configuration
 
-**Agent YAML (assistant.yaml):**
+**`config/app.yaml` — agent model reference:**
 
 ```yaml
 name: "Clinical Research Assistant"
 model: openai/BioMistral-Clinical-7B  # or Medical-Llama3-8B
 system_prompt: |
-  You are a clinical research assistant embedded in a regulated healthcare platform.
-  You have access to tools: PubMed search, openFDA adverse events, ClinicalTrials.gov, and GraphRAG.
+  A clinical research assistant embedded in a regulated healthcare platform.
+  Access to tools: PubMed search, openFDA adverse events, ClinicalTrials.gov, and GraphRAG.
   Always cite sources. Flag uncertainty. Do not hallucinate.
 tools:
   - pubmed_search
@@ -73,99 +71,48 @@ tools:
   - graphrag_search
 ```
 
-**Entity Extraction stays separate:**
-Your `entity_extractor.py` continues using `samrawal/bert-base-uncased_clinical-ner` (BioBERT). That's the right tool for strict NER.
+**NER remains separate:**  
+`entity_extractor.py` continues using `samrawal/bert-base-uncased_clinical-ner` (BioBERT). This is the correct tool for strict structured entity extraction.
 
 ---
 
-### The LPIC-1 Map Pin
+## Quantization Reference
 
-When you download this model on your **AlmaLinux VM**:
+When downloading a model in LM Studio, the quantization format controls the trade-off between quality and memory footprint:
 
-| What Happens | Linux Concept | LPIC-1 Topic |
-| :--- | :--- | :--- |
-| Model file writes to `~/.cache/lm-studio/models/` | Filesystem, user home directory | 104.7 (FHS) |
-| `lms load` spawns a process | Process management | 103.5 |
-| Server binds to port 1234 | Network sockets | 109.1, 109.3 |
-| You'll want it as a `systemd` service | Service management | 101.3 |
-
----
-
-Perfect. You've hit the **quantization selection screen**—this is where understanding model formats pays off.
-
----
-
-### What You're Looking At
-
-| Column | Meaning |
-| :--- | :--- |
-| `Q5_K_S`, `Q6_K`, `FP16`, etc. | **Quantization format**—how the model weights are compressed. |
-| Size (5.00 GB, 14.48 GB) | Disk space and VRAM required to load the model. |
-| "Full GPU offload possible" | The entire model fits in your GPU's VRAM. |
-| "Recommended" | LM Studio's suggestion based on your hardware. |
-
----
-
-### Quantization Explained (30 Seconds)
-
-| Format | Quality | Size | When to Use |
+| Format | Quality | Size vs FP16 | Recommended For |
 | :--- | :--- | :--- | :--- |
-| **FP16** | Original, lossless | Largest | Production servers with ample VRAM |
-| **Q8_0** | Near-lossless | ~50% of FP16 | High-quality inference, good GPU |
-| **Q6_K** | Excellent | ~40% of FP16 | Balanced quality/size |
-| **Q5_K_M / Q5_K_S** | Very good | ~35% of FP16 | **Sweet spot** for local dev |
-| **Q4_K_M** | Good | ~25% of FP16 | Limited VRAM, maximum speed |
+| **FP16** | Original, lossless | 100% | Production servers with ample VRAM |
+| **Q8_0** | Near-lossless | ~50% | High-quality inference, capable GPU |
+| **Q6_K** | Excellent | ~40% | Balanced quality/size |
+| **Q5_K_M / Q5_K_S** | Very good | ~35% | **Sweet spot** for local development |
+| **Q4_K_M** | Good | ~25% | Limited VRAM, maximum throughput |
 
-**The K-quants (Q5_K_S, Q6_K)** are modern GGUF formats that preserve more quality per byte than older methods.
+K-quants (`Q5_K_S`, `Q6_K`) are modern GGUF formats that preserve more accuracy per byte than earlier quantization schemes.
 
----
+### Hardware guidance
 
-### What Should You Choose?
-
-**On your Mac (M4 with ~12-16GB unified memory):**
-
-Select **Q5_K_S** (Recommended). It's 5.00 GB and will:
-
-- Fit comfortably in your unified memory
-- Leave room for KV cache and other applications
-- Maintain clinical reasoning quality
-- Load and infer faster than larger quants
-
-**For your RTX 5080 spot instance (16 GB VRAM):**
-
-You could run **Q8_0** or even **FP16** there. But for local dev, Q5_K_S is ideal.
+| Hardware | Recommended format |
+| :--- | :--- |
+| Apple Silicon M4 (12–16 GB unified memory) | **Q5_K_S** — 5.00 GB, fits comfortably, leaves headroom for KV cache |
+| NVIDIA RTX 5080 (16 GB VRAM) | **Q8_0** or **FP16** for maximum fidelity |
 
 ---
 
-### The LPIC-1 Connection
-
-| What's Happening | Linux Concept | LPIC-1 Topic |
-| :--- | :--- | :--- |
-| 5 GB file downloading to `~/.cache/lm-studio/` | Filesystem hierarchy, user home directory | 104.7 (FHS) |
-| Model loads into GPU memory | Memory management, `/proc/meminfo` | 101.1 (Hardware resources) |
-| `lms load` spawns a server process | Process management, background daemons | 103.5 |
-| Server binds to port | Network sockets, `ss -tlnp` | 109.1 |
-
----
-
-### Execute
-
-Press **Enter** on `Q5_K_S`. The download will start.
-
-Once complete:
+## Server Startup
 
 ```bash
 # Load the model
 lms load BioMistral-Clinical-7B
 
-# Start the OpenAI-compatible server
+# Start the OpenAI-compatible inference server
 lms server start
 
-# Verify it's running
+# Verify the server is serving the model
 curl http://localhost:1234/v1/models
 ```
 
-Then update your agent YAML:
+Update `config/app.yaml` to point the agent at the local server:
 
 ```yaml
 model: openai/BioMistral-Clinical-7B
@@ -174,4 +121,4 @@ model_params:
   temperature: 0.1
 ```
 
-**You're now running a clinical-grade LLM locally, with full audit trail capability, for $0.**
+The platform's tool-calling and audit trail pipeline requires no changes when switching models — the model identifier is the only configuration variable.

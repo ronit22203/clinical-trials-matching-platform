@@ -1,5 +1,7 @@
 # Documentation
 
+![MARA — Active Session](assets/ui-active-session.png)
+
 ## Guides
 
 | Document | Description |

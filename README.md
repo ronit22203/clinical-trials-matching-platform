@@ -9,6 +9,8 @@ No API keys. No cloud. Just `git clone` + `docker-compose up`.
 ![Compliance: HIPAA Aligned](https://img.shields.io/badge/Compliance-HIPAA--Aligned-green)
 ---
 
+![MARA — Active Session](docs_v2/assets/ui-active-session.png)
+
 ## Quickstart (5 minutes)
 
 ```bash
