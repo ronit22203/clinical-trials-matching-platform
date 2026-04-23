@@ -4,65 +4,98 @@ import { FileText, Code2, ListOrdered, BookMarked, Terminal, ArrowRight } from "
 import { cn } from "@/lib/utils";
 import type { ExecutionLog } from "@/lib/types/audit";
 
+export type ArtifactAction =
+  | "view-record"
+  | "inspect-profile"
+  | "view-matches"
+  | "browse-evidence"
+  | "inspect-logs";
+
 interface CaseArtifactsProps {
   executionLog?: ExecutionLog | null;
   citationCount?: number;
+  documentName?: string | null;
+  entityCount?: number | null;
+  trialCount?: number;
+  onAction?: (action: ArtifactAction) => void;
 }
 
-export default function CaseArtifacts({ executionLog, citationCount = 0 }: CaseArtifactsProps) {
-  const runLabel = executionLog
-    ? `Run ${executionLog.executionId.slice(0, 7)} · ${(executionLog.latencyMs / 1000).toFixed(1)}s · ${executionLog.toolsCalled.length} tools`
-    : "Run a3f91bc · 4.2s · 3 tools";
-
-  const evidenceLabel = executionLog && citationCount > 0
-    ? `${citationCount} citation${citationCount !== 1 ? "s" : ""} · ${executionLog.toolsCalled.length} source${executionLog.toolsCalled.length !== 1 ? "s" : ""}`
-    : "5 citations · 3 sources";
-
+export default function CaseArtifacts({
+  executionLog,
+  citationCount = 0,
+  documentName,
+  entityCount,
+  trialCount = 0,
+  onAction,
+}: CaseArtifactsProps) {
   const ARTIFACTS = [
     {
       id: "record",
       title: "Patient Record",
-      subtitle: "VasquezNewton_990219.pdf",
+      subtitle: documentName ?? "No document loaded — run a query first",
       icon: FileText,
       tag: "PDF",
-      tagClass: "bg-[rgba(0,80,80,0.08)] text-primary",
+      tagClass: documentName
+        ? "bg-[rgba(0,80,80,0.08)] text-primary"
+        : "bg-surface-highest text-on-surface-variant",
       action: "View",
+      actionId: "view-record" as ArtifactAction,
     },
     {
       id: "profile",
       title: "Clinical Profile",
-      subtitle: "Extracted JSON — 10 attributes",
+      subtitle: entityCount != null
+        ? `Extracted JSON — ${entityCount} entities`
+        : "Run a query to extract entities",
       icon: Code2,
       tag: "JSON",
-      tagClass: "bg-[rgba(0,73,125,0.08)] text-tertiary",
+      tagClass: entityCount != null
+        ? "bg-[rgba(0,73,125,0.08)] text-tertiary"
+        : "bg-surface-highest text-on-surface-variant",
       action: "Inspect",
+      actionId: "inspect-profile" as ArtifactAction,
     },
     {
       id: "matches",
       title: "Trial Matches",
-      subtitle: "5 trials ranked by eligibility score",
+      subtitle: trialCount > 0
+        ? `${trialCount} trial${trialCount !== 1 ? "s" : ""} ranked by eligibility score`
+        : "No trials matched yet",
       icon: ListOrdered,
       tag: "Ranked",
-      tagClass: "bg-[rgba(22,163,74,0.08)] text-status-eligible",
+      tagClass: trialCount > 0
+        ? "bg-[rgba(22,163,74,0.08)] text-status-eligible"
+        : "bg-surface-highest text-on-surface-variant",
       action: "View",
+      actionId: "view-matches" as ArtifactAction,
     },
     {
       id: "evidence",
       title: "Evidence Pack",
-      subtitle: evidenceLabel,
+      subtitle: executionLog && citationCount > 0
+        ? `${citationCount} citation${citationCount !== 1 ? "s" : ""} · ${executionLog.toolsCalled.length} source${executionLog.toolsCalled.length !== 1 ? "s" : ""}`
+        : "No evidence yet",
       icon: BookMarked,
       tag: "Citations",
-      tagClass: "bg-[rgba(132,212,211,0.2)] text-primary",
+      tagClass: citationCount > 0
+        ? "bg-[rgba(132,212,211,0.2)] text-primary"
+        : "bg-surface-highest text-on-surface-variant",
       action: "Browse",
+      actionId: "browse-evidence" as ArtifactAction,
     },
     {
       id: "logs",
       title: "Execution Logs",
-      subtitle: runLabel,
+      subtitle: executionLog
+        ? `Run ${executionLog.executionId.slice(0, 7)} · ${(executionLog.latencyMs / 1000).toFixed(1)}s · ${executionLog.toolsCalled.length} tools`
+        : "No runs yet",
       icon: Terminal,
       tag: "JSONL",
-      tagClass: executionLog ? "bg-[rgba(0,80,80,0.08)] text-primary" : "bg-surface-highest text-on-surface-variant",
-      action: "Inspect",
+      tagClass: executionLog
+        ? "bg-[rgba(0,80,80,0.08)] text-primary"
+        : "bg-surface-highest text-on-surface-variant",
+      action: "Download",
+      actionId: "inspect-logs" as ArtifactAction,
     },
   ] as const;
 
@@ -76,9 +109,10 @@ export default function CaseArtifacts({ executionLog, citationCount = 0 }: CaseA
       </h2>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
-        {ARTIFACTS.map(({ id, title, subtitle, icon: Icon, tag, tagClass, action }) => (
+        {ARTIFACTS.map(({ id, title, subtitle, icon: Icon, tag, tagClass, action, actionId }) => (
           <div
             key={id}
+            onClick={() => onAction?.(actionId)}
             className={cn(
               "group relative flex flex-col gap-2 p-4 rounded-2xl bg-surface-lowest ambient-shadow cursor-pointer",
               "hover:shadow-[0_8px_24px_rgba(0,80,80,0.09)] transition-shadow"
@@ -100,7 +134,10 @@ export default function CaseArtifacts({ executionLog, citationCount = 0 }: CaseA
               <p className="text-xs text-on-surface-variant mt-0.5 leading-relaxed">{subtitle}</p>
             </div>
 
-            <button className="mt-auto flex items-center gap-1 text-xs font-medium text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              className="mt-auto flex items-center gap-1 text-xs font-medium text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => { e.stopPropagation(); onAction?.(actionId); }}
+            >
               {action}
               <ArrowRight className="w-3 h-3" />
             </button>
