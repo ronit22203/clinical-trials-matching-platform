@@ -33,26 +33,40 @@ logger = logging.getLogger(__name__)
 # Prompt template
 # ---------------------------------------------------------------------------
 
-_PROMPT_TEMPLATE = """\
+# Base template — relation_verbs and few_shot_section injected at runtime
+# from config/app.yaml (knowledge_graph.relation_verbs / few_shot_examples).
+_PROMPT_BASE = """\
 Extract medical relation triplets from the text below.
+Extract ALL relevant medical entities, including diseases, datasets, measures, and institutions.
 Output ONLY valid JSON — no explanation, no markdown, no preamble.
 
 Format:
 {{"triplets": [{{"head": "EntityA", "relation": "VERB", "tail": "EntityB"}}]}}
 
 Allowed relation verbs:
-TREATS, CAUSES, PREVENTS, INHIBITS, INTERACTS_WITH,
-PREDICTS, MEASURED_BY, ASSOCIATED_WITH, REDUCES, INCREASES
+{relation_verbs}
 
-Example:
-Text: "Metformin treats type 2 diabetes and reduces HbA1c levels. \
-Sepsis causes elevated lactate."
-Output: {{"triplets":[{{"head":"Metformin","relation":"TREATS","tail":"type 2 diabetes"}},{{"head":"Metformin","relation":"REDUCES","tail":"HbA1c"}},{{"head":"Sepsis","relation":"CAUSES","tail":"elevated lactate"}}]}}
-
+{few_shot_section}
 Text:
 {chunk_text}
 
 Output:"""
+
+_DEFAULT_RELATION_VERBS = [
+    "TREATS", "CAUSES", "PREVENTS", "INHIBITS", "INTERACTS_WITH",
+    "PREDICTS", "MEASURED_BY", "ASSOCIATED_WITH", "REDUCES", "INCREASES",
+    "DIVERGES_FROM", "DEFINED_BY",
+]
+
+_FALLBACK_FEW_SHOT = (
+    'Example:\n'
+    'Text: "Metformin treats type 2 diabetes and reduces HbA1c levels. '
+    'Sepsis causes elevated lactate."\n'
+    'Output: {"triplets":['
+    '{"head":"Metformin","relation":"TREATS","tail":"type 2 diabetes"},'
+    '{"head":"Metformin","relation":"REDUCES","tail":"HbA1c"},'
+    '{"head":"Sepsis","relation":"CAUSES","tail":"elevated lactate"}]}'
+)
 
 # JSON schema sent when the LM Studio version supports it
 _RESPONSE_SCHEMA = {
@@ -210,6 +224,20 @@ class GraphCreator:
         chunk_cfg: dict = config.get("chunking", {})
         self.filter_boilerplate: bool = chunk_cfg.get("filter_boilerplate", True)
 
+        # Build relation verbs string from config (or defaults)
+        relation_verbs: list[str] = kg_cfg.get("relation_verbs", _DEFAULT_RELATION_VERBS)
+        self._relation_verbs_str: str = ", ".join(relation_verbs)
+
+        # Build few-shot block from config examples (or fallback to single example)
+        few_shot_examples: list[dict] = kg_cfg.get("few_shot_examples", [])
+        if few_shot_examples:
+            parts = ["Few-shot examples — follow these exactly:\n"]
+            for ex in few_shot_examples:
+                parts.append(f'Text: "{ex["text"]}"\nOutput: {ex["output"]}\n')
+            self._few_shot_text: str = "\n".join(parts)
+        else:
+            self._few_shot_text = _FALLBACK_FEW_SHOT
+
         neo4j_uri: str = neo4j_cfg.get("uri", "bolt://localhost:7687")
         neo4j_auth: tuple[str, str] = (
             neo4j_cfg.get("user", "neo4j"),
@@ -233,7 +261,11 @@ class GraphCreator:
     # ── prompt ────────────────────────────────────────────────────────────────
 
     def _build_prompt(self, text: str) -> str:
-        return _PROMPT_TEMPLATE.format(chunk_text=text[: self.max_chars])
+        return _PROMPT_BASE.format(
+            relation_verbs=self._relation_verbs_str,
+            few_shot_section=self._few_shot_text,
+            chunk_text=text[: self.max_chars],
+        )
 
     # ── LLM call ──────────────────────────────────────────────────────────────
 

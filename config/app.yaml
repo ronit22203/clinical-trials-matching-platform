@@ -83,9 +83,29 @@ data_ingestion:
     chat_url: ${LM_STUDIO_BASE_URL}/chat/completions
     max_retries: 2
     timeout_seconds: 180
-    max_tokens: 768
+    max_tokens: 1024
     max_text_chars: 1500
     min_chunk_chars: 50
+    relation_verbs:
+      - TREATS
+      - CAUSES
+      - PREVENTS
+      - INHIBITS
+      - INTERACTS_WITH
+      - PREDICTS
+      - MEASURED_BY
+      - ASSOCIATED_WITH
+      - REDUCES
+      - INCREASES
+      - DIVERGES_FROM
+      - DEFINED_BY
+    few_shot_examples:
+      - text: "The primary analysis used MIMIC-IV v3.1 (n=65,241 adult ICU stays) at BIDMC."
+        output: '{"triplets":[{"head":"MIMIC-IV V3.1","relation":"ASSOCIATED_WITH","tail":"BIDMC"}]}'
+      - text: "Biological features predicted Sepsis-3 labels with AUROC 0.901."
+        output: '{"triplets":[{"head":"BIOLOGICAL FEATURES","relation":"PREDICTS","tail":"SEPSIS-3"},{"head":"BIOLOGICAL FEATURES","relation":"MEASURED_BY","tail":"AUROC"}]}'
+      - text: "Sepsis-2 and Sepsis-3 agreed highly (Jaccard 0.903), but both diverged from CMS SEP-1."
+        output: '{"triplets":[{"head":"SEPSIS-2","relation":"ASSOCIATED_WITH","tail":"SEPSIS-3"},{"head":"SEPSIS-2","relation":"DIVERGES_FROM","tail":"CMS SEP-1"},{"head":"SEPSIS-3","relation":"DIVERGES_FROM","tail":"CMS SEP-1"}]}'
   retrieval:
     default_limit: 3
     hybrid_search: true
