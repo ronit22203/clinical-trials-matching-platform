@@ -207,6 +207,8 @@ class GraphCreator:
         self.max_tokens: int = kg_cfg.get("max_tokens", 768)
         self.max_chars: int = kg_cfg.get("max_text_chars", 1500)
         self.min_chars: int = kg_cfg.get("min_chunk_chars", 50)
+        chunk_cfg: dict = config.get("chunking", {})
+        self.filter_boilerplate: bool = chunk_cfg.get("filter_boilerplate", True)
 
         neo4j_uri: str = neo4j_cfg.get("uri", "bolt://localhost:7687")
         neo4j_auth: tuple[str, str] = (
@@ -399,6 +401,9 @@ class GraphCreator:
             for i, chunk in enumerate(chunks):
                 content: str = chunk.get("content", "")
                 if len(content) < self.min_chars:
+                    continue
+                if self.filter_boilerplate and chunk.get("is_boilerplate", False):
+                    logger.debug("  Chunk %d/%d — skipping boilerplate", i + 1, len(chunks))
                     continue
                 try:
                     logger.info(

@@ -57,6 +57,7 @@ data_ingestion:
     max_tokens: 500
     chunk_overlap: 50
     min_chunk_tokens: 20
+    filter_boilerplate: true   # strip preprint header/footer watermarks before indexing
     headers_to_split:
     - '#'
     - '##'

@@ -1,6 +1,26 @@
 import re
 from typing import List, Dict, Any
 
+# Patterns that mark a chunk as a preprint header/footer watermark.
+# Each entry is a compiled case-insensitive pattern; matching ANY of them
+# tags the chunk as boilerplate so it can be excluded from indexing.
+_BOILERPLATE_PATTERNS: List[re.Pattern] = [
+    re.compile(r"medrxiv preprint doi", re.IGNORECASE),
+    re.compile(r"biorxiv preprint doi", re.IGNORECASE),
+    re.compile(r"certified by peer review", re.IGNORECASE),
+    re.compile(r"copyright holder for this preprint", re.IGNORECASE),
+    re.compile(r"perpetual embargo", re.IGNORECASE),
+    re.compile(r"all rights reserved", re.IGNORECASE),
+    # OCR-garbled disclaimer lines ("This spraint reputs new tesearch…")
+    re.compile(r"spraint reputs", re.IGNORECASE),
+]
+
+
+def _is_boilerplate(text: str) -> bool:
+    """Return True if *text* matches any known preprint header/footer pattern."""
+    return any(p.search(text) for p in _BOILERPLATE_PATTERNS)
+
+
 class MarkdownChunker:
     """Context-aware hierarchical chunker for medical markdown documents."""
     
@@ -44,7 +64,8 @@ class MarkdownChunker:
                     'content': chunk_text,
                     'context': section['context_path'],
                     'level': section['level'],
-                    'page_number': section.get('page_number', 1)
+                    'page_number': section.get('page_number', 1),
+                    'is_boilerplate': _is_boilerplate(chunk_text),
                 })
             else:
                 # Split large sections while preserving context
@@ -150,11 +171,13 @@ class MarkdownChunker:
         
         # Rule A: Never split lists or code blocks (unless oversized)
         if self._is_atomic_block(content):
+            chunk_text = self._build_chunk_with_context(section)
             return [{
-                'content': self._build_chunk_with_context(section),
+                'content': chunk_text,
                 'context': section['context_path'],
                 'level': section['level'],
-                'page_number': page_number
+                'page_number': page_number,
+                'is_boilerplate': _is_boilerplate(chunk_text),
             }]
         
         # Split by paragraphs (natural boundaries)
@@ -163,11 +186,13 @@ class MarkdownChunker:
         
         def _make_chunk(paras: List[str]) -> Dict:
             chunk_content = '\n\n'.join(paras)
+            text = f"Context: {section['context_path']}\n\n{chunk_content}"
             return {
-                'content': f"Context: {section['context_path']}\n\n{chunk_content}",
+                'content': text,
                 'context': section['context_path'],
                 'level': section['level'],
                 'page_number': page_number,
+                'is_boilerplate': _is_boilerplate(text),
             }
         
         for para in paragraphs:

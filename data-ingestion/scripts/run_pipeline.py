@@ -199,9 +199,22 @@ class MedicalDataPipeline:
 
             # Derive a unique slug from the PDF's position in the directory tree.
             # For acquisition-structured paths (.../10.64898/2026.03.17.26348414/paper.pdf)
-            # the parent dir name is the document ID. Falls back to stem for flat layouts.
+            # the parent dir name is the document ID.
+            # When input_dir is the PDF's immediate parent (e.g. deterministic-run passes
+            # --input-dir as the DOI directory), rel.parent == "." and rel.stem is a generic
+            # name like "paper". In that case, climb up one level in the real filesystem to
+            # recover the meaningful DOI slug (e.g. "2026.03.17.26348414").
+            _GENERIC_PDF_STEMS = {
+                "paper", "fulltext", "document", "manuscript",
+                "article", "preprint", "doc", "file", "main",
+            }
             rel = pdf_file.relative_to(self.input_dir)
-            filename = rel.parent.name if str(rel.parent) != "." else rel.stem
+            if str(rel.parent) != ".":
+                filename = rel.parent.name
+            elif rel.stem.lower() not in _GENERIC_PDF_STEMS:
+                filename = rel.stem          # e.g. "sepsis_falsification"
+            else:
+                filename = pdf_file.parent.name  # e.g. "2026.03.17.26348414"
 
             # source_id is the full relative path — unique even if two docs share a parent name
             source_id = str(rel)

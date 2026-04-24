@@ -13,6 +13,7 @@ REASONING_DIR := agentic-reasoning
 ACQUISITION_DIR := data-acquisition
 INGESTION_DIR := data-ingestion
 UI_DIR := platform-ui
+BENCHMARKING_DIR := benchmarking
 CONFIG_FILE := config/app.yaml
 
 REASONING_PYTHON := .venv/bin/python
@@ -33,11 +34,26 @@ DOC ?=
 EXEC1 ?=
 EXEC2 ?=
 
+# --- [ Benchmark config ] -----------------------------------------------------
+BENCH_PYTHON   ?= $(CURDIR)/$(REASONING_DIR)/.venv/bin/python
+BENCH_RUNS     ?= 3
+RUN_DATE       := $(shell date +%Y%m%d_%H%M%S)
+RUN_HASH       := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+RUN_DIR        ?= $(BENCHMARKING_DIR)/results/run_$(RUN_DATE)_$(RUN_HASH)
+
+# Golden PDF for deterministic end-to-end runs (path relative to repo root)
+BENCH_PDF      ?= data/pdfs/raw/medrxiv/2026/04/22/10.64898/2026.03.17.26348414/paper.pdf
+BENCH_PDF_DIR  := $(dir $(BENCH_PDF))
+DET_RUN_ID     := det_$(RUN_DATE)_$(RUN_HASH)
+DET_RUN_DIR    := $(BENCHMARKING_DIR)/results/$(DET_RUN_ID)
+
 FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py,$(SOURCE).py)
 
 .PHONY: help \
 	bootstrap validate up down serve serve-api serve-ui fetch ingest \
 	status benchmark-sepsis \
+	benchmark-all benchmark-retrieval benchmark-extraction benchmark-inference benchmark-report \
+	deterministic-run _det-ingest-timed _det-graph-timed _det-finalize \
 	clean clean-all clean-artifacts clean-ocr clean-md clean-chunks clean-vectors clean-graph clean-hard \
 	ui-install ui-dev ui-build ui-start \
 	reasoning-install reasoning-clean reasoning-test reasoning-run reasoning-run-query \
@@ -151,6 +167,137 @@ benchmark-sepsis: ## Run the Sepsis Falsification paper through the full pipelin
 	@$(MAKE) --no-print-directory ingestion-neo4j-build
 	@$(MAKE) --no-print-directory reasoning-run-query \
 		QUERY="Analyze the care-process intensity vs biological signal findings in this paper."
+
+benchmark-all: ## Run the full evaluation harness and generate report (RUN_DIR auto-generated)
+	@printf "$(BOLD)$(BLUE)═══ Benchmark Suite — $(RUN_DIR) ═══$(NC)\n"
+	@mkdir -p "$(RUN_DIR)"
+	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-provenance RUN_DIR="$(RUN_DIR)"
+	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-retrieval RUN_DIR="$(RUN_DIR)"
+	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-extraction RUN_DIR="$(RUN_DIR)"
+	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-inference RUN_DIR="$(RUN_DIR)"
+	@$(MAKE) --no-print-directory benchmark-report RUN_DIR="$(RUN_DIR)"
+	@printf "$(GREEN)$(BOLD)Full benchmark complete → $(RUN_DIR)/report.md$(NC)\n"
+
+benchmark-provenance: ## Capture provenance manifest for the current run
+	@printf "$(CYAN)Capturing provenance …$(NC)\n"
+	@mkdir -p "$(RUN_DIR)"
+	@BENCH_RUN_ID_ARG="$${BENCH_RUN_ID:-bench_$(RUN_DATE)_$(RUN_HASH)}"; \
+	 cd $(BENCHMARKING_DIR) && $(BENCH_PYTHON) provenance.py "$$BENCH_RUN_ID_ARG" \
+		> "../$(RUN_DIR)/manifest.json"
+
+benchmark-retrieval: ## Run retrieval evaluation (Recall@K, Precision@K, NDCG@K, MRR, HitRate)
+	@printf "$(CYAN)Running retrieval evaluator …$(NC)\n"
+	@mkdir -p "$(RUN_DIR)"
+	@cd $(BENCHMARKING_DIR) && BENCH_RUN_ID="$${BENCH_RUN_ID:-bench_$(RUN_DATE)_$(RUN_HASH)}" \
+		$(BENCH_PYTHON) evaluators/retrieval_evaluator.py \
+		--golden golden/queries.json \
+		--output "../$(RUN_DIR)/retrieval.json"
+
+benchmark-extraction: ## Run extraction evaluation (entity/relation F1 vs Neo4j)
+	@printf "$(CYAN)Running extraction evaluator …$(NC)\n"
+	@mkdir -p "$(RUN_DIR)"
+	@cd $(BENCHMARKING_DIR) && BENCH_RUN_ID="$${BENCH_RUN_ID:-bench_$(RUN_DATE)_$(RUN_HASH)}" \
+		$(BENCH_PYTHON) evaluators/extraction_evaluator.py \
+		--golden-entities golden/sepsis_entities.json \
+		--golden-relations golden/sepsis_relationships.json \
+		--output "../$(RUN_DIR)/extraction.json"
+
+benchmark-inference: ## Run inference timing evaluation (TTFT, TPOT, throughput)
+	@printf "$(CYAN)Running inference evaluator ($(BENCH_RUNS) runs) …$(NC)\n"
+	@mkdir -p "$(RUN_DIR)"
+	@cd $(BENCHMARKING_DIR) && BENCH_RUN_ID="$${BENCH_RUN_ID:-bench_$(RUN_DATE)_$(RUN_HASH)}" \
+		$(BENCH_PYTHON) evaluators/inference_evaluator.py \
+		--queries golden/queries.json \
+		--runs "$(BENCH_RUNS)" \
+		--output "../$(RUN_DIR)/inference.json"
+
+benchmark-report: ## Generate Markdown report from a completed run dir (RUN_DIR=...)
+	@test -n "$(RUN_DIR)" || { printf "$(RED)FAIL: RUN_DIR is required$(NC)\n"; exit 1; }
+	@printf "$(CYAN)Generating report → $(RUN_DIR)/report.md$(NC)\n"
+	@cd $(BENCHMARKING_DIR) && $(BENCH_PYTHON) reporter.py \
+		--run-dir "../$(RUN_DIR)" \
+		--output "../$(RUN_DIR)/report.md"
+	@printf "$(GREEN)Report ready: $(RUN_DIR)/report.md$(NC)\n"
+
+# ─── [ Deterministic end-to-end run ] ─────────────────────────────────────────
+# Executes the full pipeline from a clean slate through to a final manifest.json
+# that embeds provenance, pipeline timings, and all benchmark metrics.
+#
+#   Phases:
+#     1  Preflight  — validate all services are reachable
+#     2  Reset      — wipe artifacts, Qdrant collection, Neo4j graph
+#     3  Ingest     — OCR → Markdown → clean → chunk → embed (golden PDF only)
+#     4  Graph      — build Neo4j knowledge graph from chunks
+#     5  Provenance — capture git commit, config hashes, model names, data hashes
+#     6  Retrieval  — Recall@K, Precision@K, NDCG@K, MRR, HitRate (bootstrap CIs)
+#     7  Extraction — entity/relation F1 (exact + relaxed) vs Neo4j
+#     8  Inference  — TTFT, TPOT, throughput across $(BENCH_RUNS) independent runs
+#     9  Finalize   — merge all stage JSONs → single manifest.json + report.md
+#
+#   Override the golden PDF:  make deterministic-run BENCH_PDF=data/pdfs/my.pdf
+#   Override inference runs:  make deterministic-run BENCH_RUNS=5
+
+deterministic-run: ## ★ Full deterministic pipeline → single manifest.json (wipe → ingest → KG → benchmark)
+	@printf "\n$(BOLD)$(BLUE)═══════════════════════════════════════════════════════════$(NC)\n"
+	@printf "$(BOLD)$(BLUE)  DETERMINISTIC RUN  $(DET_RUN_ID)$(NC)\n"
+	@printf "$(BOLD)$(BLUE)  PDF: $(BENCH_PDF)$(NC)\n"
+	@printf "$(BOLD)$(BLUE)═══════════════════════════════════════════════════════════$(NC)\n\n"
+	@mkdir -p "$(DET_RUN_DIR)"
+	@printf "$(CYAN) 1/9$(NC) Preflight: validating services …\n"
+	@$(MAKE) --no-print-directory validate
+	@printf "\n$(CYAN) 2/9$(NC) Reset: wiping artifacts, vectors, graph …\n"
+	@$(MAKE) --no-print-directory clean-artifacts
+	@$(MAKE) --no-print-directory clean-vectors
+	@$(MAKE) --no-print-directory clean-graph
+	@printf "\n$(CYAN) 3/9$(NC) Ingest: OCR → Markdown → clean → chunk → embed …\n"
+	@$(MAKE) --no-print-directory _det-ingest-timed DET_RUN_DIR="$(DET_RUN_DIR)"
+	@printf "\n$(CYAN) 4/9$(NC) Graph: building Neo4j knowledge graph …\n"
+	@$(MAKE) --no-print-directory _det-graph-timed DET_RUN_DIR="$(DET_RUN_DIR)"
+	@printf "\n$(CYAN) 5/9$(NC) Provenance: capturing git, config, model, data hashes …\n"
+	@BENCH_RUN_ID="$(DET_RUN_ID)" \
+	 $(MAKE) --no-print-directory benchmark-provenance RUN_DIR="$(DET_RUN_DIR)"
+	@printf "\n$(CYAN) 6/9$(NC) Retrieval: Recall@K, NDCG, MRR, HitRate (bootstrap CIs) …\n"
+	@$(MAKE) --no-print-directory benchmark-retrieval RUN_DIR="$(DET_RUN_DIR)"
+	@printf "\n$(CYAN) 7/9$(NC) Extraction: entity/relation F1 vs Neo4j …\n"
+	@$(MAKE) --no-print-directory benchmark-extraction RUN_DIR="$(DET_RUN_DIR)"
+	@printf "\n$(CYAN) 8/9$(NC) Inference: TTFT/TPOT/throughput ($(BENCH_RUNS) runs × 20 queries) …\n"
+	@BENCH_RUN_ID="$(DET_RUN_ID)" \
+	 $(MAKE) --no-print-directory benchmark-inference RUN_DIR="$(DET_RUN_DIR)"
+	@printf "\n$(CYAN) 9/9$(NC) Finalize: merging stage outputs → manifest.json + report …\n"
+	@$(MAKE) --no-print-directory _det-finalize DET_RUN_DIR="$(DET_RUN_DIR)"
+	@$(MAKE) --no-print-directory benchmark-report RUN_DIR="$(DET_RUN_DIR)"
+	@printf "\n$(GREEN)$(BOLD)✓ Deterministic run complete$(NC)\n"
+	@printf "  Run ID:   $(DET_RUN_ID)\n"
+	@printf "  Manifest: $(DET_RUN_DIR)/manifest.json\n"
+	@printf "  Report:   $(DET_RUN_DIR)/report.md\n"
+	@printf "\n  Reproduce:\n"
+	@printf "    git checkout $(RUN_HASH) && make deterministic-run\n\n"
+
+_det-ingest-timed: ## [internal] Run ingestion pipeline on the golden PDF, record elapsed time
+	@T0=$$(date +%s); \
+	 cd $(INGESTION_DIR) && python3 scripts/run_pipeline.py \
+	     --config ../$(CONFIG_FILE) \
+	     --input-dir "../$(BENCH_PDF_DIR)" \
+	     --max-pdfs 1 \
+	     --skip-graph; \
+	 T1=$$(date +%s); ELAPSED=$$((T1-T0)); \
+	 printf '{"stage":"ingest","elapsed_s":%d,"input_dir":"%s","max_pdfs":1}\n' \
+	     "$$ELAPSED" "$(BENCH_PDF_DIR)" \
+	     > "../$(DET_RUN_DIR)/pipeline_ingest.json"; \
+	 printf "$(GREEN)  ✓ Ingest complete in $${ELAPSED}s$(NC)\n"
+
+_det-graph-timed: ## [internal] Build Neo4j KG from chunks, record elapsed time
+	@T0=$$(date +%s); \
+	 cd $(INGESTION_DIR) && python3 scripts/build_knowledge_graph.py \
+	     --config ../$(CONFIG_FILE); \
+	 T1=$$(date +%s); ELAPSED=$$((T1-T0)); \
+	 printf '{"stage":"graph","elapsed_s":%d}\n' "$$ELAPSED" \
+	     > "../$(DET_RUN_DIR)/pipeline_graph.json"; \
+	 printf "$(GREEN)  ✓ Graph built in $${ELAPSED}s$(NC)\n"
+
+_det-finalize: ## [internal] Merge all stage JSONs into a single manifest.json
+	@cd $(BENCHMARKING_DIR) && $(BENCH_PYTHON) finalize.py \
+	     --run-dir "../$(DET_RUN_DIR)"
 
 clean: ingestion-clean ## Remove generated caches and logs
 

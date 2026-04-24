@@ -111,9 +111,15 @@ class MedicalVectorizer:
         # Step 3: Generate embeddings and prepare points for Qdrant
         points = []
         vec_config = self.config.get('vectorization', {})
+        chunk_config = self.config.get('chunking', {})
         batch_size = vec_config.get('batch_size', 64)
+        filter_boilerplate: bool = chunk_config.get('filter_boilerplate', True)
         
+        skipped_boilerplate = 0
         for i, chunk in enumerate(chunks):
+            if filter_boilerplate and chunk.get('is_boilerplate', False):
+                skipped_boilerplate += 1
+                continue
             # Embed the chunk content
             embedding = self.embedding_model.encode(
                 chunk['content'],
@@ -146,6 +152,8 @@ class MedicalVectorizer:
                 points=batch
             )
         
+        if skipped_boilerplate:
+            print(f"  ↳ Skipped {skipped_boilerplate} boilerplate chunk(s) (preprint headers/footers)")
         print(f"✓ Indexed {len(points)} chunks from {file_path.name}")
 
     def run(self, input_dir_path: str = None):
