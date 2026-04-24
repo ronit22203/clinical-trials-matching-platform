@@ -43,6 +43,20 @@ def _resolve(project_root: Path, rel: str) -> Path:
     return (project_root / rel).resolve()
 
 
+class KnowledgeGraphBuilder:
+    """Programmatic interface to GraphCreator for use by run_pipeline.py."""
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        self._config = config
+        self._creator = GraphCreator(config)
+
+    def run(self, chunks_dir: Path) -> None:
+        self._creator.process_chunks_dir(Path(chunks_dir))
+
+    def close(self) -> None:
+        self._creator.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build Neo4j knowledge graph from chunk JSON files"

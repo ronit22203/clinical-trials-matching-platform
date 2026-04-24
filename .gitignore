@@ -128,3 +128,6 @@ docker-compose.override.yml
 *.tmp
 .tmp/
 temp/
+
+# ─── Benchmark results (raw run outputs) ─────────────────────────────────────
+benchmarking/results/

@@ -1,0 +1,242 @@
+{
+  "document_doi": "10.64898/2026.03.17.26348414",
+  "document_title": "Falsification Testing of Sepsis Prediction Models: Evaluating Independent Biological Signal After Controlling for Care-Process Intensity",
+  "chunks_file": "2026.03.17.26348414_chunks.json",
+  "total_chunks": 24,
+  "chunk_index_note": "chunk_XX refers to chunk_index field in Qdrant payload (0-based). Substantive chunks: 01,04,06,07,09,11,13,15,17,19,21,23. Chunks 00,03,05,08,10,12,14,16,18,20,22 are header/footer boilerplate.",
+  "queries": [
+    {
+      "id": "q01",
+      "category": "clinical_finding",
+      "text": "Do sepsis early-warning systems detect biological signal or care-process intensity?",
+      "relevant_chunks": ["chunk_01", "chunk_17", "chunk_04"],
+      "relevance_grades": {
+        "chunk_01": 2,
+        "chunk_17": 2,
+        "chunk_04": 1,
+        "chunk_19": 1
+      },
+      "min_expected_entities": ["Sepsis", "MIMIC-IV", "care-process intensity", "biological signal"]
+    },
+    {
+      "id": "q02",
+      "category": "clinical_finding",
+      "text": "What is the primary conclusion about sepsis prediction at an elite academic medical center?",
+      "relevant_chunks": ["chunk_17", "chunk_01", "chunk_19"],
+      "relevance_grades": {
+        "chunk_17": 2,
+        "chunk_01": 2,
+        "chunk_19": 1
+      },
+      "min_expected_entities": ["BIDMC", "MIMIC-IV", "biological signal"]
+    },
+    {
+      "id": "q03",
+      "category": "clinical_finding",
+      "text": "How does care-process leakage magnitude differ between academic medical centers and community hospitals?",
+      "relevant_chunks": ["chunk_15", "chunk_17"],
+      "relevance_grades": {
+        "chunk_15": 2,
+        "chunk_17": 2,
+        "chunk_01": 1
+      },
+      "min_expected_entities": ["eICU-CRD", "MIMIC-IV", "care-process leakage"]
+    },
+    {
+      "id": "q04",
+      "category": "clinical_finding",
+      "text": "What is the most clinically consequential finding regarding sepsis definition divergence?",
+      "relevant_chunks": ["chunk_17", "chunk_13", "chunk_15"],
+      "relevance_grades": {
+        "chunk_17": 2,
+        "chunk_15": 2,
+        "chunk_13": 1,
+        "chunk_01": 1
+      },
+      "min_expected_entities": ["CMS SEP-1", "Sepsis-3", "Jaccard similarity"]
+    },
+    {
+      "id": "q05",
+      "category": "quantitative",
+      "text": "What AUROC did biological features achieve predicting Sepsis-3 labels in MIMIC-IV?",
+      "relevant_chunks": ["chunk_13", "chunk_01"],
+      "relevance_grades": {
+        "chunk_13": 2,
+        "chunk_01": 1,
+        "chunk_11": 1
+      },
+      "min_expected_entities": ["AUROC", "biological features", "Sepsis-3", "MIMIC-IV"]
+    },
+    {
+      "id": "q06",
+      "category": "quantitative",
+      "text": "What was the AUC drop when care-intensity features were removed from the full prediction model?",
+      "relevant_chunks": ["chunk_13", "chunk_15"],
+      "relevance_grades": {
+        "chunk_13": 2,
+        "chunk_15": 1,
+        "chunk_01": 1
+      },
+      "min_expected_entities": ["AUC drop", "care-intensity features", "XGBoost"]
+    },
+    {
+      "id": "q07",
+      "category": "quantitative",
+      "text": "What Jaccard similarity was found between CMS SEP-1 administrative coding and clinical sepsis definitions?",
+      "relevant_chunks": ["chunk_13", "chunk_15", "chunk_01"],
+      "relevance_grades": {
+        "chunk_13": 2,
+        "chunk_15": 2,
+        "chunk_01": 1
+      },
+      "min_expected_entities": ["Jaccard similarity", "CMS SEP-1", "Sepsis-3", "Sepsis-2"]
+    },
+    {
+      "id": "q08",
+      "category": "quantitative",
+      "text": "What was the XGBoost sensitivity analysis AUROC for care-intensity features alone in Phase 3?",
+      "relevant_chunks": ["chunk_13", "chunk_11"],
+      "relevance_grades": {
+        "chunk_13": 2,
+        "chunk_11": 1
+      },
+      "min_expected_entities": ["XGBoost", "AUROC", "care-intensity", "Phase 3"]
+    },
+    {
+      "id": "q09",
+      "category": "quantitative",
+      "text": "How many adult ICU stays were included in the primary MIMIC-IV analytic cohort after exclusions?",
+      "relevant_chunks": ["chunk_11", "chunk_07"],
+      "relevance_grades": {
+        "chunk_11": 2,
+        "chunk_07": 1
+      },
+      "min_expected_entities": ["MIMIC-IV", "ICU stays", "65,241"]
+    },
+    {
+      "id": "q10",
+      "category": "definitional",
+      "text": "How does the Sepsis-3 definition differ from CMS SEP-1 in this study?",
+      "relevant_chunks": ["chunk_09", "chunk_04"],
+      "relevance_grades": {
+        "chunk_09": 2,
+        "chunk_04": 1,
+        "chunk_13": 1
+      },
+      "min_expected_entities": ["Sepsis-3", "CMS SEP-1", "SOFA score", "ICD codes"]
+    },
+    {
+      "id": "q11",
+      "category": "definitional",
+      "text": "How was the infection proxy defined, and what criteria were used to identify antibiotics and blood cultures?",
+      "relevant_chunks": ["chunk_09", "chunk_06"],
+      "relevance_grades": {
+        "chunk_09": 2,
+        "chunk_06": 1
+      },
+      "min_expected_entities": ["infection proxy", "antibiotic", "blood culture"]
+    },
+    {
+      "id": "q12",
+      "category": "definitional",
+      "text": "What are care-intensity proxy features and how were they operationalized per ICU hour?",
+      "relevant_chunks": ["chunk_09", "chunk_11"],
+      "relevance_grades": {
+        "chunk_09": 2,
+        "chunk_11": 1
+      },
+      "min_expected_entities": ["lab ordering frequency", "vital measurement rate", "nursing note frequency", "physician order rate"]
+    },
+    {
+      "id": "q13",
+      "category": "definitional",
+      "text": "What pre-registration requirements were applied and when was this study registered on OSF?",
+      "relevant_chunks": ["chunk_06", "chunk_23"],
+      "relevance_grades": {
+        "chunk_06": 2,
+        "chunk_23": 1,
+        "chunk_21": 1
+      },
+      "min_expected_entities": ["OSF", "pre-registration", "March 11, 2026"]
+    },
+    {
+      "id": "q14",
+      "category": "comparative",
+      "text": "How did eICU multi-center results differ from MIMIC-IV in Phase 2 AUC drop and care-intensity signal?",
+      "relevant_chunks": ["chunk_15", "chunk_17"],
+      "relevance_grades": {
+        "chunk_15": 2,
+        "chunk_17": 2
+      },
+      "min_expected_entities": ["eICU-CRD", "MIMIC-IV", "AUC drop"]
+    },
+    {
+      "id": "q15",
+      "category": "comparative",
+      "text": "How did the Jaccard similarity between clinical and administrative sepsis definitions compare across MIMIC-IV, eICU, and MIMIC-III?",
+      "relevant_chunks": ["chunk_15", "chunk_13"],
+      "relevance_grades": {
+        "chunk_15": 2,
+        "chunk_13": 1
+      },
+      "min_expected_entities": ["MIMIC-IV", "eICU-CRD", "MIMIC-III", "Jaccard similarity", "CMS SEP-1"]
+    },
+    {
+      "id": "q16",
+      "category": "comparative",
+      "text": "Which datasets met the pre-specified Phase 3 threshold of care-only AUROC greater than 0.70?",
+      "relevant_chunks": ["chunk_15", "chunk_13"],
+      "relevance_grades": {
+        "chunk_15": 2,
+        "chunk_13": 1
+      },
+      "min_expected_entities": ["Phase 3", "AUROC", "XGBoost", "care-intensity"]
+    },
+    {
+      "id": "q17",
+      "category": "comparative",
+      "text": "How did Phase 4 synthetic validation discriminator AUROC compare between MIMIC-IV and the PhysioNet 2019 Challenge dataset?",
+      "relevant_chunks": ["chunk_15", "chunk_13"],
+      "relevance_grades": {
+        "chunk_15": 2,
+        "chunk_13": 1,
+        "chunk_11": 1
+      },
+      "min_expected_entities": ["Gaussian copula", "discriminator", "AUROC", "PhysioNet/CinC 2019"]
+    },
+    {
+      "id": "q18",
+      "category": "methodology",
+      "text": "What four phases comprised the pre-registered falsification framework?",
+      "relevant_chunks": ["chunk_06", "chunk_01", "chunk_11"],
+      "relevance_grades": {
+        "chunk_06": 2,
+        "chunk_01": 2,
+        "chunk_11": 1
+      },
+      "min_expected_entities": ["falsification framework", "Phase 1", "Phase 2", "Phase 3", "Phase 4"]
+    },
+    {
+      "id": "q19",
+      "category": "methodology",
+      "text": "What statistical methods were used for bootstrap confidence intervals and cross-validation in this study?",
+      "relevant_chunks": ["chunk_11", "chunk_13"],
+      "relevance_grades": {
+        "chunk_11": 2,
+        "chunk_13": 1
+      },
+      "min_expected_entities": ["bootstrap", "5-fold stratified cross-validation", "XGBoost", "logistic regression"]
+    },
+    {
+      "id": "q20",
+      "category": "methodology",
+      "text": "How was the Gaussian copula used to generate synthetic records in Phase 4 and how was distributional equivalence confirmed?",
+      "relevant_chunks": ["chunk_11", "chunk_13"],
+      "relevance_grades": {
+        "chunk_11": 2,
+        "chunk_13": 1
+      },
+      "min_expected_entities": ["Gaussian copula", "Kolmogorov-Smirnov", "synthetic records", "Phase 4"]
+    }
+  ]
+}

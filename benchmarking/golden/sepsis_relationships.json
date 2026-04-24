@@ -1,0 +1,115 @@
+{
+  "document_doi": "10.64898/2026.03.17.26348414",
+  "source_file": "2026.03.17.26348414_chunks.json",
+  "annotation_note": "Relations use the graph_creator's allowed verbs where possible: TREATS, CAUSES, PREVENTS, INHIBITS, INTERACTS_WITH, PREDICTS, MEASURED_BY, ASSOCIATED_WITH, REDUCES, INCREASES. Non-standard verbs (e.g. CONTAINS, COMPRISES) are also annotated for the ideal-KG comparison. Strict evaluation requires exact (source, target, type) match; relaxed evaluation matches (source, target) case-insensitively with type ignored.",
+  "relationships": [
+    {
+      "source": "biological features",
+      "target": "Sepsis-3",
+      "type": "PREDICTS",
+      "evidence": "Full XGBoost model AUROC 0.901; biological-feature-only model AUROC 0.898"
+    },
+    {
+      "source": "care-process intensity",
+      "target": "Sepsis-3",
+      "type": "PREDICTS",
+      "evidence": "Logistic regression care-only AUROC 0.660; XGBoost sensitivity analysis 0.729"
+    },
+    {
+      "source": "XGBoost",
+      "target": "Sepsis-3",
+      "type": "PREDICTS",
+      "evidence": "XGBoost classifiers trained on Sepsis-3 labels using 5-fold stratified cross-validation"
+    },
+    {
+      "source": "care-process intensity",
+      "target": "model performance",
+      "type": "REDUCES",
+      "evidence": "Removing care-intensity features reduced AUROC by only 0.003 (AUC drop = 0.0027)"
+    },
+    {
+      "source": "Sepsis-2",
+      "target": "Sepsis-3",
+      "type": "ASSOCIATED_WITH",
+      "evidence": "Jaccard similarity = 0.903, indicating high concordance between SIRS-based and SOFA-based definitions"
+    },
+    {
+      "source": "Sepsis-3",
+      "target": "CMS SEP-1",
+      "type": "ASSOCIATED_WITH",
+      "evidence": "Jaccard similarity = 0.317, indicating major divergence between clinical and administrative definitions"
+    },
+    {
+      "source": "Sepsis-2",
+      "target": "CMS SEP-1",
+      "type": "ASSOCIATED_WITH",
+      "evidence": "Jaccard similarity = 0.317 at primary site and ~0.20 across multi-center cohorts"
+    },
+    {
+      "source": "MIMIC-IV v3.1",
+      "target": "BIDMC",
+      "type": "ASSOCIATED_WITH",
+      "evidence": "MIMIC-IV contains all adult ICU admissions at Beth Israel Deaconess Medical Center 2008-2022"
+    },
+    {
+      "source": "eICU-CRD v2.0",
+      "target": "care-process leakage",
+      "type": "ASSOCIATED_WITH",
+      "evidence": "AUC drop = 0.076 in eICU multi-center cohort vs 0.003 at BIDMC academic center"
+    },
+    {
+      "source": "falsification framework",
+      "target": "pre-registration",
+      "type": "ASSOCIATED_WITH",
+      "evidence": "Four-phase framework registered on OSF March 11, 2026 before data access"
+    },
+    {
+      "source": "Gaussian copula",
+      "target": "synthetic records",
+      "type": "CAUSES",
+      "evidence": "50,000 synthetic records generated from copula fitted to care-intensity feature distributions"
+    },
+    {
+      "source": "XGBoost",
+      "target": "synthetic records",
+      "type": "MEASURED_BY",
+      "evidence": "XGBoost discriminator trained to distinguish real from synthetic records; AUROC 0.633"
+    },
+    {
+      "source": "SOFA score",
+      "target": "Sepsis-3",
+      "type": "MEASURED_BY",
+      "evidence": "Sepsis-3 requires SOFA score >= 2 plus infection proxy"
+    },
+    {
+      "source": "logistic regression",
+      "target": "Sepsis-3",
+      "type": "PREDICTS",
+      "evidence": "Primary Phase 3 model; most conservative test of care-intensity hypothesis"
+    },
+    {
+      "source": "MIMIC-IV v3.1",
+      "target": "eICU-CRD v2.0",
+      "type": "ASSOCIATED_WITH",
+      "evidence": "Both used for falsification analysis; MIMIC-IV is primary confirmatory, eICU is exploratory replication"
+    },
+    {
+      "source": "label instability",
+      "target": "AI benchmarks",
+      "type": "CAUSES",
+      "evidence": "AI systems benchmarked on administrative labels may learn billing patterns rather than biology"
+    },
+    {
+      "source": "Sepsis",
+      "target": "ICU mortality",
+      "type": "CAUSES",
+      "evidence": "Sepsis remains among the leading causes of ICU mortality"
+    },
+    {
+      "source": "PhysioNet/CinC 2019",
+      "target": "care-process leakage",
+      "type": "ASSOCIATED_WITH",
+      "evidence": "Discriminator AUROC 0.460 (near chance) and care-only AUC 0.694 suggest pronounced care-process leakage"
+    }
+  ]
+}
