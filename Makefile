@@ -41,6 +41,13 @@ RUN_DATE       := $(shell date +%Y%m%d_%H%M%S)
 RUN_HASH       := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 RUN_DIR        ?= $(BENCHMARKING_DIR)/results/run_$(RUN_DATE)_$(RUN_HASH)
 
+# Reranker config (defaults to BGE base; override with RERANKER_MODEL="" to disable)
+RERANKER_MODEL ?= BAAI/bge-reranker-base
+RETRIEVAL_K    ?=
+
+_RERANKER_ARGS := $(if $(RERANKER_MODEL),--reranker-model "$(RERANKER_MODEL)",) \
+                  $(if $(RETRIEVAL_K),--retrieval-k "$(RETRIEVAL_K)",)
+
 # Golden PDF for deterministic end-to-end runs (path relative to repo root)
 BENCH_PDF      ?= data/pdfs/raw/medrxiv/2026/04/22/10.64898/2026.03.17.26348414/paper.pdf
 BENCH_PDF_DIR  := $(dir $(BENCH_PDF))
@@ -191,7 +198,8 @@ benchmark-retrieval: ## Run retrieval evaluation (Recall@K, Precision@K, NDCG@K,
 	@cd $(BENCHMARKING_DIR) && BENCH_RUN_ID="$${BENCH_RUN_ID:-bench_$(RUN_DATE)_$(RUN_HASH)}" \
 		$(BENCH_PYTHON) evaluators/retrieval_evaluator.py \
 		--golden golden/queries.json \
-		--output "../$(RUN_DIR)/retrieval.json"
+		--output "../$(RUN_DIR)/retrieval.json" \
+		$(_RERANKER_ARGS)
 
 benchmark-extraction: ## Run extraction evaluation (entity/relation F1 vs Neo4j)
 	@printf "$(CYAN)Running extraction evaluator …$(NC)\n"

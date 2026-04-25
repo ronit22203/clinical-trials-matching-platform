@@ -39,6 +39,11 @@ class HybridRetriever:
         self._collection = collection
         self._default_limit: int = retrieval_cfg.get('default_limit', 3)
         self._hybrid_search: bool = retrieval_cfg.get('hybrid_search', True)
+        self._reranker_model_name: Optional[str] = retrieval_cfg.get('reranker_model') or None
+        cfg_retrieval_k = retrieval_cfg.get('retrieval_k')
+        self._retrieval_k: Optional[int] = int(cfg_retrieval_k) if cfg_retrieval_k else None
+        self._model_cache_dir: str = vec_cfg.get('model_cache_dir', 'data/models')
+        self._reranker = None
 
         # 1. Vector Connection
         self.qdrant = QdrantClient(qdrant_url)
@@ -48,9 +53,21 @@ class HybridRetriever:
         self.driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
         logger.info("Hybrid Retriever (Vector + Graph) Initialized")
 
+    def _get_reranker(self):
+        """Lazy-load CrossEncoder reranker. Returns None when reranker_model is not configured."""
+        if not self._reranker_model_name:
+            return None
+        if self._reranker is None:
+            from sentence_transformers import CrossEncoder
+            logger.info("Loading reranker: %s", self._reranker_model_name)
+            self._reranker = CrossEncoder(self._reranker_model_name, cache_dir=self._model_cache_dir)
+        return self._reranker
+
     def search(self, query: str, limit: int = None) -> List[Dict]:
         """
         Performs Vector Search, then enriches results with Graph Facts.
+        When a reranker is configured, over-fetches from Qdrant, reranks with
+        CrossEncoder, and returns the top `limit` results sorted by reranker score.
         
         Args:
             query: Natural language query string.
@@ -59,28 +76,31 @@ class HybridRetriever:
         if limit is None:
             limit = self._default_limit
 
+        reranker = self._get_reranker()
+        if reranker is not None:
+            fetch_limit = self._retrieval_k if self._retrieval_k else limit * 2
+        else:
+            fetch_limit = limit
+
         # Step A: Vector Search (The "Wide Net")
         query_vector = self.embedder.encode(query).tolist()
         hits = self.qdrant.query_points(
             collection_name=self._collection,
             query=query_vector,
-            limit=limit
+            limit=fetch_limit
         ).points
 
-        results = []
+        candidates = []
         for hit in hits:
             chunk_id = hit.payload.get('chunk_id')
             source = hit.payload.get('source')
             chunk_index = hit.payload.get('chunk_index', 0)
 
-            graph_facts = self._fetch_graph_context(source)
-
-            # Prefer content stored in Qdrant; fall back to on-disk chunk file
             content = hit.payload.get('content')
             if not content:
                 content = self._load_chunk_content(source, chunk_index)
 
-            results.append({
+            candidates.append({
                 "id": hit.id,
                 "score": hit.score,
                 "content": content,
@@ -91,8 +111,25 @@ class HybridRetriever:
                 "level": hit.payload.get('level'),
                 "page_number": hit.payload.get('page_number'),
                 "payload": hit.payload,
-                "graph_facts": graph_facts
             })
+
+        # Step B: Optional CrossEncoder reranking
+        if reranker is not None and candidates:
+            pairs = [(query, c["content"] or "") for c in candidates]
+            scores: List[float] = reranker.predict(pairs).tolist()
+            for c, s in zip(candidates, scores):
+                c["reranker_score"] = round(s, 6)
+            candidates.sort(key=lambda c: c["reranker_score"], reverse=True)
+            logger.info(
+                "Reranker (%s) scored %d candidates → returning top %d",
+                self._reranker_model_name, len(candidates), limit,
+            )
+
+        results = candidates[:limit]
+
+        # Step C: Enrich with graph facts
+        for result in results:
+            result["graph_facts"] = self._fetch_graph_context(result["source"])
             
         return results
 

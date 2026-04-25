@@ -106,14 +106,22 @@ def generate_report(run_dir: Path) -> str:
         agg = retrieval.get("aggregate", {})
         per_q = retrieval.get("per_query", [])
         cfg = retrieval.get("config", {})
+        reranker = cfg.get("reranker_model")
 
-        lines.append("## Retrieval Quality")
+        section_title = "## Retrieval Quality" + (" (reranked)" if reranker else "")
+        lines.append(section_title)
         lines.append("")
+        retrieval_k_note = (
+            f", retrieval_k={cfg.get('retrieval_k', '?')}"
+            if reranker else ""
+        )
         lines.append(
-            f"20 queries, top-{cfg.get('top_k', '?')}, "
+            f"20 queries, top-{cfg.get('top_k', '?')}{retrieval_k_note}, "
             f"bootstrap n={cfg.get('bootstrap_resamples', '?')}, "
             f"collection `{cfg.get('collection', '?')}`"
         )
+        if reranker:
+            lines.append(f"reranker `{reranker}`")
         lines.append("")
         lines.append("| Metric | Value | 95% CI |")
         lines.append("|--------|-------|--------|")

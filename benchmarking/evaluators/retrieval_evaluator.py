@@ -11,6 +11,8 @@ Usage:
         [--collection medical_papers] \\
         [--embedding-model BAAI/bge-small-en-v1.5] \\
         [--top-k 10] \\
+        [--reranker-model BAAI/bge-reranker-base] \\
+        [--retrieval-k 20] \\
         [--bootstrap-resamples 1000]
 """
 from __future__ import annotations
@@ -140,14 +142,23 @@ class RetrievalEvaluator:
         embedding_model: str,
         top_k: int = 10,
         bootstrap_resamples: int = 1000,
+        reranker_model: str | None = None,
+        retrieval_k: int | None = None,
     ) -> None:
         self.qdrant_url = qdrant_url
         self.collection = collection
         self.embedding_model_name = embedding_model
         self.top_k = top_k
         self.bootstrap_resamples = bootstrap_resamples
+        self.reranker_model_name = reranker_model
+        # When a reranker is active, over-fetch from Qdrant then rerank down to top_k.
+        # Default over-fetch multiplier is 2× top_k; caller can override via retrieval_k.
+        self.retrieval_k: int = retrieval_k if retrieval_k is not None else (
+            top_k * 2 if reranker_model else top_k
+        )
         self._qdrant = None
         self._model = None
+        self._reranker = None
 
     def _get_qdrant(self):
         if self._qdrant is None:
@@ -165,23 +176,59 @@ class RetrievalEvaluator:
             )
         return self._model
 
+    def _get_reranker(self):
+        """Lazy-load CrossEncoder reranker. Uses the same model cache as the embedder."""
+        if self._reranker is None:
+            from sentence_transformers import CrossEncoder
+            cache_dir = str(_REPO_ROOT / "data" / "models")
+            log.info("Loading reranker: %s", self.reranker_model_name)
+            self._reranker = CrossEncoder(
+                self.reranker_model_name,
+                cache_dir=cache_dir,
+            )
+        return self._reranker
+
     def _query(self, text: str) -> list[dict[str, Any]]:
         vec = self._get_model().encode(text).tolist()
         hits = self._get_qdrant().query_points(
             collection_name=self.collection,
             query=vec,
-            limit=self.top_k,
+            limit=self.retrieval_k,
         ).points
+
+        candidates = [
+            {
+                "chunk_index": h.payload.get("chunk_index", -1),
+                "vector_score": round(h.score, 6),
+                "source": h.payload.get("source", ""),
+                "page_number": h.payload.get("page_number"),
+                "content": h.payload.get("content", ""),
+                "content_preview": h.payload.get("content", "")[:80],
+            }
+            for h in hits
+        ]
+
+        if self.reranker_model_name and candidates:
+            reranker = self._get_reranker()
+            pairs = [(text, c["content"]) for c in candidates]
+            scores: list[float] = reranker.predict(pairs).tolist()
+            for c, s in zip(candidates, scores):
+                c["reranker_score"] = round(s, 6)
+            candidates.sort(key=lambda c: c["reranker_score"], reverse=True)  # type: ignore[return-value]
+            score_field = "reranker_score"
+        else:
+            score_field = "vector_score"
+
         return [
             {
                 "rank": i + 1,
-                "chunk_index": h.payload.get("chunk_index", -1),
-                "score": round(h.score, 6),
-                "source": h.payload.get("source", ""),
-                "page_number": h.payload.get("page_number"),
-                "content_preview": h.payload.get("content", "")[:80],
+                "chunk_index": c["chunk_index"],
+                "score": c[score_field],
+                "source": c["source"],
+                "page_number": c["page_number"],
+                "content_preview": c["content_preview"],
             }
-            for i, h in enumerate(hits)
+            for i, c in enumerate(candidates[: self.top_k])
         ]
 
     def evaluate_query(self, query: dict[str, Any]) -> dict[str, Any]:
@@ -259,16 +306,21 @@ class RetrievalEvaluator:
             "hit_rate_at_5": _agg("hit_at_5"),
         }
 
+        cfg_block: dict[str, Any] = {
+            "collection": self.collection,
+            "embedding_model": self.embedding_model_name,
+            "top_k": self.top_k,
+            "bootstrap_resamples": self.bootstrap_resamples,
+        }
+        if self.reranker_model_name:
+            cfg_block["reranker_model"] = self.reranker_model_name
+            cfg_block["retrieval_k"] = self.retrieval_k
+
         result: dict[str, Any] = {
             "run_id": run_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "elapsed_seconds": round(elapsed, 2),
-            "config": {
-                "collection": self.collection,
-                "embedding_model": self.embedding_model_name,
-                "top_k": self.top_k,
-                "bootstrap_resamples": self.bootstrap_resamples,
-            },
+            "config": cfg_block,
             "aggregate": aggregate,
             "per_query": per_query,
         }
@@ -317,6 +369,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--collection", default=None)
     p.add_argument("--embedding-model", default=None)
     p.add_argument("--top-k", type=int, default=10)
+    p.add_argument(
+        "--reranker-model",
+        default=None,
+        help="Optional cross-encoder reranker (e.g. BAAI/bge-reranker-base). "
+             "When set, Qdrant fetches --retrieval-k candidates and reranks to --top-k.",
+    )
+    p.add_argument(
+        "--retrieval-k",
+        type=int,
+        default=None,
+        help="Candidates to fetch from Qdrant before reranking (default: top-k * 2).",
+    )
     p.add_argument("--bootstrap-resamples", type=int, default=1000)
     return p
 
@@ -348,6 +412,8 @@ def main() -> None:
         embedding_model=args.embedding_model or default_model,
         top_k=args.top_k,
         bootstrap_resamples=args.bootstrap_resamples,
+        reranker_model=args.reranker_model or None,
+        retrieval_k=args.retrieval_k or None,
     )
     evaluator.run(
         golden_path=Path(args.golden),

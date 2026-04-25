@@ -65,6 +65,7 @@ data_ingestion:
     respect_atomic_blocks: true
   vectorization:
     model_name: BAAI/bge-small-en-v1.5
+    model_cache_dir: data/models
     embedding_dim: 384
     device: cpu
     normalize_embeddings: false
@@ -109,6 +110,8 @@ data_ingestion:
   retrieval:
     default_limit: 3
     hybrid_search: true
+    reranker_model: BAAI/bge-reranker-base
+    retrieval_k: null           # over-fetch multiplier; null = default_limit * 2 when reranker active
   pipeline:
     skip_existing: false
     max_retries: 1
@@ -1020,6 +1023,8 @@ agentic_reasoning:
         model_cache_dir: data/models
         limit: 3
         neo4j_limit: 10
+        reranker_model: BAAI/bge-reranker-base
+        retrieval_k: null       # candidates to over-fetch before reranking; null = limit * 2
       auth:
         type: none
       enabled: true
