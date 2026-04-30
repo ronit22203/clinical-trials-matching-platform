@@ -41,7 +41,8 @@ class MarkdownChunker:
         Split markdown into context-aware chunks.
         
         Returns:
-            List of dicts with 'content', 'context', and 'level' keys
+            List of dicts with 'content', 'context', 'level', 'char_start', 'char_end' keys.
+            char_start/char_end are character offsets of the raw section content in *text*.
         """
         sections = self._parse_sections(text)
         chunks = []
@@ -52,7 +53,9 @@ class MarkdownChunker:
                 'context_path': 'Document Body',
                 'level': 1,
                 'content': text,
-                'page_number': 1
+                'page_number': 1,
+                'char_start': 0,
+                'char_end': len(text),
             }]
         
         for section in sections:
@@ -66,6 +69,8 @@ class MarkdownChunker:
                     'level': section['level'],
                     'page_number': section.get('page_number', 1),
                     'is_boilerplate': _is_boilerplate(chunk_text),
+                    'char_start': section.get('char_start'),
+                    'char_end': section.get('char_end'),
                 })
             else:
                 # Split large sections while preserving context
@@ -80,22 +85,36 @@ class MarkdownChunker:
     def _parse_sections(self, text: str) -> List[Dict]:
         """Parse markdown into hierarchical sections (the tree structure)."""
         lines = text.split('\n')
+
+        # Precompute the character start offset of each line in the original text.
+        line_offsets: List[int] = []
+        cursor = 0
+        for line in lines:
+            line_offsets.append(cursor)
+            cursor += len(line) + 1  # +1 for the '\n' separator
+
         sections = []
         current_headers = ['', '', '', '']  # H1, H2, H3, H4
-        current_content = []
+        current_content: List[str] = []
         current_level = 0
         current_page_number = 1  # Default to page 1
+        content_start_line: int = -1   # index of the first content line in the current section
+        content_end_line: int = -1     # index of the last content line in the current section
         
-        for line in lines:
+        for line_idx, line in enumerate(lines):
             # Step 0: Check for page markers - treat as mandatory section breaks
             page_match = re.match(r'^<!--\s*PAGE:\s*(\d+)\s*-->$', line)
             if page_match:
                 # Save previous section if we have content
                 if current_content:
                     sections.append(self._create_section(
-                        current_headers, current_level, current_content, current_page_number
+                        current_headers, current_level, current_content, current_page_number,
+                        char_start=line_offsets[content_start_line],
+                        char_end=line_offsets[content_end_line] + len(lines[content_end_line]),
                     ))
                     current_content = []
+                    content_start_line = -1
+                    content_end_line = -1
                 
                 current_page_number = int(page_match.group(1))
                 continue
@@ -107,9 +126,13 @@ class MarkdownChunker:
                 # Save previous section if exists
                 if current_content:
                     sections.append(self._create_section(
-                        current_headers, current_level, current_content, current_page_number
+                        current_headers, current_level, current_content, current_page_number,
+                        char_start=line_offsets[content_start_line],
+                        char_end=line_offsets[content_end_line] + len(lines[content_end_line]),
                     ))
                     current_content = []
+                    content_start_line = -1
+                    content_end_line = -1
                 
                 # Step 2: Update header hierarchy (parent-child relationships)
                 level = len(header_match.group(1))
@@ -120,18 +143,31 @@ class MarkdownChunker:
                 for i in range(level, 4):
                     current_headers[i] = ''
             else:
+                if not current_content:
+                    content_start_line = line_idx
                 current_content.append(line)
+                content_end_line = line_idx
         
         # Save last section
         if current_content:
             sections.append(self._create_section(
-                current_headers, current_level, current_content, current_page_number
+                current_headers, current_level, current_content, current_page_number,
+                char_start=line_offsets[content_start_line],
+                char_end=line_offsets[content_end_line] + len(lines[content_end_line]),
             ))
         
         return sections
     
-    def _create_section(self, headers: List[str], level: int, content: List[str], page_number: int = 1) -> Dict:
-        """Create a section with its full context path."""
+    def _create_section(
+        self,
+        headers: List[str],
+        level: int,
+        content: List[str],
+        page_number: int = 1,
+        char_start: int = None,
+        char_end: int = None,
+    ) -> Dict:
+        """Create a section with its full context path and byte-range in the source text."""
         # Build breadcrumb: "Clinical Studies > Efficacy Results"
         context_parts = [h for h in headers[:level] if h]
         return {
@@ -139,7 +175,9 @@ class MarkdownChunker:
             'level': level,
             'content': '\n'.join(content).strip(),
             'headers': headers.copy(),
-            'page_number': page_number
+            'page_number': page_number,
+            'char_start': char_start,
+            'char_end': char_end,
         }
     
     def _build_chunk_with_context(self, section: Dict) -> str:
@@ -164,10 +202,13 @@ class MarkdownChunker:
         
         When chunk_overlap > 0, consecutive chunks share trailing/leading paragraphs
         so that concepts spanning a boundary are present in both chunks.
+        char_start/char_end on each output chunk reflect the paragraph range within
+        the original source text.
         """
         chunks = []
         content = section['content']
         page_number = section.get('page_number', 1)
+        section_char_start: int | None = section.get('char_start')
         
         # Rule A: Never split lists or code blocks (unless oversized)
         if self._is_atomic_block(content):
@@ -178,49 +219,80 @@ class MarkdownChunker:
                 'level': section['level'],
                 'page_number': page_number,
                 'is_boilerplate': _is_boilerplate(chunk_text),
+                'char_start': section_char_start,
+                'char_end': section.get('char_end'),
             }]
         
         # Split by paragraphs (natural boundaries)
         paragraphs = content.split('\n\n')
+
+        # Precompute each paragraph's (start, end) offset within the section content string.
+        para_ranges: List[tuple[int, int]] = []
+        search_pos = 0
+        for para in paragraphs:
+            idx = content.find(para, search_pos)
+            if idx == -1:
+                # Fallback: keep search_pos advancing monotonically
+                para_ranges.append((search_pos, search_pos + len(para)))
+                search_pos += len(para) + 2  # +2 for '\n\n'
+            else:
+                para_ranges.append((idx, idx + len(para)))
+                search_pos = idx + len(para)
+
         current_paras: List[str] = []
-        
-        def _make_chunk(paras: List[str]) -> Dict:
+        current_para_indices: List[int] = []
+
+        def _make_chunk(paras: List[str], para_indices: List[int]) -> Dict:
             chunk_content = '\n\n'.join(paras)
             text = f"Context: {section['context_path']}\n\n{chunk_content}"
+            # Derive absolute char offsets from the first/last paragraph ranges.
+            if section_char_start is not None and para_indices:
+                c_start = section_char_start + para_ranges[para_indices[0]][0]
+                c_end = section_char_start + para_ranges[para_indices[-1]][1]
+            else:
+                c_start = None
+                c_end = None
             return {
                 'content': text,
                 'context': section['context_path'],
                 'level': section['level'],
                 'page_number': page_number,
                 'is_boilerplate': _is_boilerplate(text),
+                'char_start': c_start,
+                'char_end': c_end,
             }
         
-        for para in paragraphs:
+        for p_idx, para in enumerate(paragraphs):
             test_content = '\n\n'.join(current_paras + [para])
             test_chunk = f"Context: {section['context_path']}\n\n{test_content}"
             
             if self._estimate_tokens(test_chunk) > self.max_tokens and current_paras:
-                chunks.append(_make_chunk(current_paras))
+                chunks.append(_make_chunk(current_paras, current_para_indices))
                 
                 # Sliding-window overlap: carry over trailing paragraphs
                 if self.chunk_overlap > 0:
                     overlap_paras: List[str] = []
+                    overlap_indices: List[int] = []
                     overlap_tokens = 0
-                    for p in reversed(current_paras):
-                        p_tokens = self._estimate_tokens(p)
+                    for op, oi in zip(reversed(current_paras), reversed(current_para_indices)):
+                        p_tokens = self._estimate_tokens(op)
                         if overlap_tokens + p_tokens > self.chunk_overlap:
                             break
-                        overlap_paras.insert(0, p)
+                        overlap_paras.insert(0, op)
+                        overlap_indices.insert(0, oi)
                         overlap_tokens += p_tokens
                     current_paras = overlap_paras + [para]
+                    current_para_indices = overlap_indices + [p_idx]
                 else:
                     current_paras = [para]
+                    current_para_indices = [p_idx]
             else:
                 current_paras.append(para)
+                current_para_indices.append(p_idx)
         
         # Add remaining content
         if current_paras:
-            chunks.append(_make_chunk(current_paras))
+            chunks.append(_make_chunk(current_paras, current_para_indices))
         
         return chunks
     

@@ -43,6 +43,7 @@ class HybridRetriever:
         cfg_retrieval_k = retrieval_cfg.get('retrieval_k')
         self._retrieval_k: Optional[int] = int(cfg_retrieval_k) if cfg_retrieval_k else None
         self._model_cache_dir: str = vec_cfg.get('model_cache_dir', 'data/models')
+        self._graph_facts_limit: int = retrieval_cfg.get('graph_facts_limit', 5)
         self._reranker = None
 
         # 1. Vector Connection
@@ -148,9 +149,10 @@ class HybridRetriever:
                     MATCH (h)-[r]->(t)
                     WHERE r.source = $source
                     RETURN h.name, type(r) AS relation_type, t.name
-                    LIMIT 5
+                    LIMIT $limit
                     """,
                     source=source_file,
+                    limit=self._graph_facts_limit,
                 )
                 for record in result:
                     fact = f"{record['h.name']} --[{record['relation_type']}]--> {record['t.name']}"

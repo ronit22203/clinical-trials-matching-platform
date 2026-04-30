@@ -41,10 +41,15 @@ Extract ALL relevant medical entities, including diseases, datasets, measures, a
 Output ONLY valid JSON — no explanation, no markdown, no preamble.
 
 Format:
-{{"triplets": [{{"head": "EntityA", "relation": "VERB", "tail": "EntityB"}}]}}
+{{"triplets": [{{"head": "EntityA", "relation": "VERB", "tail": "EntityB", "tier": 2}}]}}
 
 Allowed relation verbs:
 {relation_verbs}
+
+Tier values (assign one per triplet):
+1 = words appear verbatim in the text
+2 = clearly stated or paraphrased
+3 = logically inferred, not explicitly stated
 
 {few_shot_section}
 Text:
@@ -58,14 +63,40 @@ _DEFAULT_RELATION_VERBS = [
     "DIVERGES_FROM", "DEFINED_BY",
 ]
 
+# ---------------------------------------------------------------------------
+# Entity normalisation
+# ---------------------------------------------------------------------------
+
+# Ordered list of (compiled_pattern, replacement) applied after uppercasing.
+_ENTITY_NORM_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r'\bTYPE\s+(\d+)\b'),         r'TYPE\1'),       # TYPE 2 → TYPE2
+    (re.compile(r'\bCOVID[\s\-]*19\b'),        'COVID19'),       # COVID-19 / COVID 19 variants
+    (re.compile(r'\s+'),                        ' '),             # collapse internal whitespace
+]
+
+
+def _normalize_entity(name: str) -> str:
+    """
+    Normalise an entity name for Neo4j deduplication.
+
+    Steps:
+      1. Uppercase + strip leading/trailing whitespace.
+      2. Apply domain-specific regex rewrites (TYPE 2 → TYPE2, etc.).
+      3. Strip trailing punctuation artifacts (commas, periods, semicolons).
+    """
+    name = name.upper().strip()
+    for pattern, replacement in _ENTITY_NORM_PATTERNS:
+        name = pattern.sub(replacement, name)
+    return name.strip('.,;:')
+
 _FALLBACK_FEW_SHOT = (
     'Example:\n'
     'Text: "Metformin treats type 2 diabetes and reduces HbA1c levels. '
     'Sepsis causes elevated lactate."\n'
     'Output: {"triplets":['
-    '{"head":"Metformin","relation":"TREATS","tail":"type 2 diabetes"},'
-    '{"head":"Metformin","relation":"REDUCES","tail":"HbA1c"},'
-    '{"head":"Sepsis","relation":"CAUSES","tail":"elevated lactate"}]}'
+    '{"head":"Metformin","relation":"TREATS","tail":"type 2 diabetes","tier":1},'
+    '{"head":"Metformin","relation":"REDUCES","tail":"HbA1c","tier":1},'
+    '{"head":"Sepsis","relation":"CAUSES","tail":"elevated lactate","tier":1}]}'
 )
 
 # JSON schema sent when the LM Studio version supports it
@@ -82,11 +113,12 @@ _RESPONSE_SCHEMA = {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "head": {"type": "string"},
+                            "head":     {"type": "string"},
                             "relation": {"type": "string"},
-                            "tail": {"type": "string"},
+                            "tail":     {"type": "string"},
+                            "tier":     {"type": "integer"},
                         },
-                        "required": ["head", "relation", "tail"],
+                        "required": ["head", "relation", "tail", "tier"],
                         "additionalProperties": False,
                     },
                 }
@@ -291,13 +323,20 @@ class GraphCreator:
             timeout=self.timeout,
         )
 
-    def extract_triplets(self, text: str) -> list[dict]:
+    def extract_triplets(self, text: str) -> list[dict] | None:
         """
         Send *text* to the configured LLM and return validated triplets.
 
+        Returns:
+            List of triplet dicts on success (may be empty if nothing to extract).
+            ``None`` when all retry attempts fail — callers must NOT mark the
+            chunk as processed so it is retried on the next run.
+
         Auto-detects json_schema support on the first call: if the server
-        returns HTTP 400 (unsupported response_format), retries without the
-        schema and stores the result so later calls skip the probe entirely.
+        returns HTTP 400 whose body references ``response_format`` or
+        ``json_schema``, the schema is disabled for the remainder of the
+        session.  Other 400s (e.g. model loading failures) are treated as
+        transient errors and do NOT change the schema flag.
         """
         if len(text) < self.min_chars:
             return []
@@ -309,13 +348,24 @@ class GraphCreator:
             try:
                 resp = self._post(prompt, use_schema=use_schema)
 
-                # json_schema not supported by this LM Studio version → degrade
+                # Distinguish a genuine json_schema rejection from other 400s
+                # (e.g. "Failed to load model") before downgrading schema mode.
                 if resp.status_code == 400 and use_schema:
-                    logger.info(
-                        "Server rejected response_format; switching to text mode"
-                    )
-                    self._json_schema_supported = False
-                    resp = self._post(prompt, use_schema=False)
+                    body = resp.text.lower()
+                    if "response_format" in body or "json_schema" in body:
+                        logger.info(
+                            "Server rejected response_format; switching to text mode"
+                        )
+                        self._json_schema_supported = False
+                        resp = self._post(prompt, use_schema=False)
+                    else:
+                        logger.warning(
+                            "LLM HTTP 400 (attempt %d) — not a schema error: %s",
+                            attempt + 1,
+                            resp.text[:200],
+                        )
+                        time.sleep(2**attempt)
+                        continue
 
                 if resp.status_code != 200:
                     logger.warning(
@@ -361,21 +411,36 @@ class GraphCreator:
             if attempt < self.max_retries - 1:
                 time.sleep(2**attempt)
 
-        return []
+        logger.warning("extract_triplets: all %d attempts failed — chunk will not be marked done", self.max_retries)
+        return None
 
     # ── Neo4j write ───────────────────────────────────────────────────────────
 
     def write_triplets(
-        self, triplets: list[dict], source_file: str, chunk_id: int
+        self,
+        triplets: list[dict],
+        source_file: str,
+        chunk_id: int,
+        byte_start: int | None = None,
+        byte_end: int | None = None,
     ) -> None:
-        """Upsert *triplets* into Neo4j as typed Entity relationships."""
+        """Upsert *triplets* into Neo4j as typed Entity relationships.
+
+        Args:
+            triplets:    Validated triplet dicts with head/relation/tail (and optional tier).
+            source_file: Stem of the source chunk file (written to r.source).
+            chunk_id:    Index of the chunk within the source file.
+            byte_start:  Character offset of the chunk's raw content in the cleaned markdown.
+            byte_end:    End character offset (exclusive) of the chunk's raw content.
+        """
         if not triplets:
             return
 
         with self._driver.session() as session:
             for t in triplets:
-                head = t["head"].strip().upper()
-                tail = t["tail"].strip().upper()
+                head = _normalize_entity(t["head"])
+                tail = _normalize_entity(t["tail"])
+                tier: int = int(t.get("tier", 2))
                 raw_rel = (
                     t["relation"].strip().upper().replace(" ", "_").replace("-", "_")
                 )
@@ -389,12 +454,15 @@ class GraphCreator:
                 MERGE (h:Entity {{name: $head}})
                 MERGE (t:Entity {{name: $tail}})
                 MERGE (h)-[r:{rel_type}]->(t)
-                SET r.source = $source, r.chunk_id = $chunk_id
+                SET r.source = $source, r.chunk_id = $chunk_id,
+                    r.byte_start = $byte_start, r.byte_end = $byte_end,
+                    r.tier = $tier
                 """
                 try:
                     session.run(
                         query, head=head, tail=tail,
                         source=source_file, chunk_id=chunk_id,
+                        byte_start=byte_start, byte_end=byte_end, tier=tier,
                     )
                 except Exception as exc:
                     logger.warning("Neo4j write error: %s", exc)
@@ -404,11 +472,33 @@ class GraphCreator:
             len(triplets), source_file, chunk_id,
         )
 
+    # ── resume helpers ────────────────────────────────────────────────────────
+
+    def _load_progress(self, chunks_dir: Path) -> dict[str, set[int]]:
+        """Load the per-file chunk progress map from ``.kg_progress.json``."""
+        path = chunks_dir / ".kg_progress.json"
+        if path.exists():
+            try:
+                raw: dict = json.loads(path.read_text(encoding="utf-8"))
+                return {k: set(v) for k, v in raw.items()}
+            except Exception as exc:
+                logger.warning("Could not read progress file (%s); starting fresh", exc)
+        return {}
+
+    def _save_progress(self, chunks_dir: Path, progress: dict[str, set[int]]) -> None:
+        """Flush the progress map to ``.kg_progress.json``."""
+        path = chunks_dir / ".kg_progress.json"
+        serializable = {k: sorted(v) for k, v in progress.items()}
+        path.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
+
     # ── pipeline entry-point ──────────────────────────────────────────────────
 
     def process_chunks_dir(self, chunks_dir: Path) -> int:
         """
         Process all ``*_chunks.json`` files under *chunks_dir*.
+
+        Skips chunks already recorded in ``.kg_progress.json`` so interrupted
+        runs can resume from where they left off without reprocessing.
 
         Returns:
             Total number of triplets written across all chunks.
@@ -419,6 +509,12 @@ class GraphCreator:
             return 0
 
         logger.info("GraphCreator: found %d chunk file(s)", len(chunk_files))
+        progress = self._load_progress(chunks_dir)
+        total_skipped = sum(len(v) for v in progress.values())
+        if total_skipped:
+            logger.info(
+                "GraphCreator: resuming — %d chunk(s) already processed", total_skipped
+            )
         total_triplets = 0
 
         for file_path in chunk_files:
@@ -429,21 +525,53 @@ class GraphCreator:
             chunks: list[dict] = (
                 data.get("chunks", []) if isinstance(data, dict) else data
             )
+            file_key = file_path.stem
+            processed_set: set[int] = progress.get(file_key, set())
 
             for i, chunk in enumerate(chunks):
+                # Resume: skip chunks already successfully written on a previous run.
+                if i in processed_set:
+                    logger.debug(
+                        "  Chunk %d/%d — skipping (already processed)", i + 1, len(chunks)
+                    )
+                    continue
+
                 content: str = chunk.get("content", "")
                 if len(content) < self.min_chars:
                     continue
                 if self.filter_boilerplate and chunk.get("is_boilerplate", False):
                     logger.debug("  Chunk %d/%d — skipping boilerplate", i + 1, len(chunks))
                     continue
+
+                byte_start: int | None = chunk.get("char_start")
+                byte_end: int | None = chunk.get("char_end")
+
                 try:
                     logger.info(
                         "  Chunk %d/%d — extracting triplets…", i + 1, len(chunks)
                     )
                     triplets = self.extract_triplets(content)
-                    self.write_triplets(triplets, file_path.stem, i)
+
+                    # None → LLM failed on all retries; leave chunk unrecorded
+                    # so it is retried on the next run.
+                    if triplets is None:
+                        logger.warning(
+                            "  Chunk %d/%d — LLM failed, skipping progress mark",
+                            i + 1, len(chunks),
+                        )
+                        continue
+
+                    self.write_triplets(
+                        triplets, file_key, i,
+                        byte_start=byte_start, byte_end=byte_end,
+                    )
                     total_triplets += len(triplets)
+
+                    # Mark chunk as done and persist immediately.
+                    processed_set.add(i)
+                    progress[file_key] = processed_set
+                    self._save_progress(chunks_dir, progress)
+
                 except KeyboardInterrupt:
                     logger.info(
                         "Interrupted at chunk %d/%d. Re-run to resume.",

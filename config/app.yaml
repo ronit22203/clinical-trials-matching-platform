@@ -102,16 +102,17 @@ data_ingestion:
       - DEFINED_BY
     few_shot_examples:
       - text: "The primary analysis used MIMIC-IV v3.1 (n=65,241 adult ICU stays) at BIDMC."
-        output: '{"triplets":[{"head":"MIMIC-IV V3.1","relation":"ASSOCIATED_WITH","tail":"BIDMC"}]}'
+        output: '{"triplets":[{"head":"MIMIC-IV V3.1","relation":"ASSOCIATED_WITH","tail":"BIDMC","tier":1}]}'
       - text: "Biological features predicted Sepsis-3 labels with AUROC 0.901."
-        output: '{"triplets":[{"head":"BIOLOGICAL FEATURES","relation":"PREDICTS","tail":"SEPSIS-3"},{"head":"BIOLOGICAL FEATURES","relation":"MEASURED_BY","tail":"AUROC"}]}'
+        output: '{"triplets":[{"head":"BIOLOGICAL FEATURES","relation":"PREDICTS","tail":"SEPSIS-3","tier":1},{"head":"BIOLOGICAL FEATURES","relation":"MEASURED_BY","tail":"AUROC","tier":1}]}'
       - text: "Sepsis-2 and Sepsis-3 agreed highly (Jaccard 0.903), but both diverged from CMS SEP-1."
-        output: '{"triplets":[{"head":"SEPSIS-2","relation":"ASSOCIATED_WITH","tail":"SEPSIS-3"},{"head":"SEPSIS-2","relation":"DIVERGES_FROM","tail":"CMS SEP-1"},{"head":"SEPSIS-3","relation":"DIVERGES_FROM","tail":"CMS SEP-1"}]}'
+        output: '{"triplets":[{"head":"SEPSIS-2","relation":"ASSOCIATED_WITH","tail":"SEPSIS-3","tier":1},{"head":"SEPSIS-2","relation":"DIVERGES_FROM","tail":"CMS SEP-1","tier":1},{"head":"SEPSIS-3","relation":"DIVERGES_FROM","tail":"CMS SEP-1","tier":1}]}'
   retrieval:
     default_limit: 3
     hybrid_search: true
     reranker_model: BAAI/bge-reranker-base
     retrieval_k: null           # over-fetch multiplier; null = default_limit * 2 when reranker active
+    graph_facts_limit: 10       # max Neo4j facts injected per vector result
   pipeline:
     skip_existing: false
     max_retries: 1
