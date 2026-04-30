@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClinicalMatch AI</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Alpine.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <!-- D3.js (force graph) -->
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+
+  <link rel="stylesheet" href="css/custom.css" />
+</head>
+<body class="bg-slate-50 min-h-screen font-sans antialiased" x-data="app()" x-init="init()">
+
+  <!-- ── HEADER ─────────────────────────────────────────────────────────────── -->
+  <header class="bg-slate-900 border-b border-slate-700 px-6 py-4">
+    <div class="max-w-5xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center text-white font-bold text-sm">CM</div>
+        <div>
+          <h1 class="text-white font-semibold text-lg leading-tight">ClinicalMatch AI</h1>
+          <p class="text-slate-400 text-xs">Hybrid Vector + Knowledge Graph Retrieval</p>
+        </div>
+      </div>
+
+      <!-- Benchmark badge (populated on init) -->
+      <div class="flex items-center gap-2 flex-wrap" x-show="stats">
+        <template x-if="stats">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="stat-chip">
+              <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              Recall@5 <strong x-text="(stats.recall_at_5 * 100).toFixed(0) + '%'"></strong>
+            </span>
+            <span class="stat-chip">
+              <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              TTFT <strong x-text="stats.ttft_p50_ms.toFixed(0) + 'ms'"></strong>
+            </span>
+            <span class="stat-chip">
+              <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h7a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
+              <strong x-text="stats.throughput_tok_s.toFixed(1) + ' tok/s'"></strong>
+            </span>
+            <span class="text-slate-500 text-xs" x-text="stats.run_id"></span>
+          </div>
+        </template>
+        <template x-if="!stats">
+          <span class="text-slate-500 text-xs">No benchmark data</span>
+        </template>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── MAIN ───────────────────────────────────────────────────────────────── -->
+  <main class="max-w-5xl mx-auto px-4 py-8">
+
+    <!-- Query panel -->
+    <section class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
+      <h2 class="text-slate-800 font-semibold mb-4">Clinical Query</h2>
+
+      <textarea
+        class="w-full border border-slate-300 rounded-lg p-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+        rows="4"
+        placeholder="Describe the patient condition, lab findings, or clinical question…"
+        x-model="query"
+        :disabled="state === 'loading'"
+      ></textarea>
+
+      <div class="mt-3 flex items-center gap-3 flex-wrap">
+        <!-- CSV upload -->
+        <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-600 border border-slate-300 rounded-lg px-3 py-2 hover:bg-slate-50 transition-colors"
+               :class="{ 'opacity-50 pointer-events-none': state === 'loading' }">
+          <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+          </svg>
+          <span x-text="csvFile ? csvFile.name : 'Upload CSV'"></span>
+          <input type="file" accept=".csv" class="hidden" @change="onCsvChange($event)" :disabled="state === 'loading'" />
+        </label>
+
+        <!-- Sample CSV link -->
+        <a href="assets/sample.csv" download class="text-xs text-blue-600 hover:underline">↓ sample.csv</a>
+
+        <div class="ml-auto flex items-center gap-3">
+          <!-- Clear button -->
+          <button
+            x-show="state === 'results' || state === 'error'"
+            @click="reset()"
+            class="text-sm text-slate-500 hover:text-slate-700 transition-colors"
+          >Clear</button>
+
+          <!-- Submit button -->
+          <button
+            @click="submit()"
+            :disabled="state === 'loading' || !query.trim()"
+            class="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors flex items-center gap-2"
+          >
+            <div class="spinner w-4 h-4 border-2" x-show="state === 'loading'"
+                 style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></div>
+            <span x-text="state === 'loading' ? 'Searching…' : 'Match Trials'"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- CSV preview -->
+      <div x-show="csvFile" class="mt-2 text-xs text-slate-500 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+        </svg>
+        <span x-text="csvFile ? csvFile.name : ''"></span>
+        — first row will augment the query
+      </div>
+    </section>
+
+    <!-- Pipeline progress -->
+    <section x-show="state === 'loading'" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
+      <h3 class="text-slate-600 text-sm font-semibold mb-3 uppercase tracking-wide">Processing Pipeline</h3>
+      <div class="flex flex-col gap-1">
+        <template x-for="(step, i) in pipelineSteps" :key="i">
+          <div class="pipeline-step"
+               :class="{
+                 'complete': loadingStep > i,
+                 'active':   loadingStep === i,
+                 'pending':  loadingStep < i
+               }">
+            <div class="step-icon">
+              <template x-if="loadingStep > i">
+                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+              </template>
+              <template x-if="loadingStep === i">
+                <div class="spinner" style="width:10px; height:10px; border-width:2px;"></div>
+              </template>
+            </div>
+            <span x-text="step"></span>
+          </div>
+        </template>
+      </div>
+    </section>
+
+    <!-- Error state -->
+    <div x-show="state === 'error'" class="bg-red-50 border border-red-200 rounded-xl p-5 mb-6 text-sm text-red-700">
+      <strong>Error:</strong> <span x-text="errorMessage"></span>
+    </div>
+
+    <!-- Results -->
+    <section x-show="state === 'results' && results">
+      <!-- Summary row -->
+      <div class="flex items-center justify-between mb-4">
+        <div class="text-slate-700 text-sm">
+          <span class="font-semibold" x-text="results?.matches?.length || 0"></span> matches ·
+          <span x-text="results?.latencyMs + 'ms'"></span> ·
+          <span class="text-slate-400 text-xs" x-text="'id:' + results?.executionId"></span>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="kw in (results?.keywords || [])" :key="kw">
+            <span class="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-full border border-blue-200" x-text="kw"></span>
+          </template>
+        </div>
+      </div>
+
+      <!-- ── AI SYNTHESIS PANE ──────────────────────────────────────────────── -->
+      <div x-show="synthesisLoading || synthesis"
+           class="synthesis-pane rounded-xl border border-slate-200 bg-white shadow-sm mb-6 overflow-hidden">
+
+        <!-- Header bar -->
+        <div class="synthesis-header flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div class="flex items-center gap-2.5">
+            <!-- Sparkle / brain icon -->
+            <svg class="w-4 h-4 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.344.346a3.5 3.5 0 00-1.008 2.26V19a2 2 0 01-2 2H9a2 2 0 01-2-2v-.654a3.5 3.5 0 00-1.008-2.26l-.344-.346z"/>
+            </svg>
+            <span class="text-sm font-semibold text-slate-800">AI Synthesis</span>
+            <template x-if="synthesis?.model">
+              <span class="text-xs text-slate-400 font-mono" x-text="synthesis.model"></span>
+            </template>
+            <template x-if="synthesisLoading">
+              <div class="flex items-center gap-1.5 text-xs text-slate-400">
+                <div class="spinner w-3 h-3 border-2" style="border-color:rgba(99,102,241,0.2);border-top-color:#6366f1"></div>
+                Generating…
+              </div>
+            </template>
+          </div>
+
+          <!-- Action buttons (visible once synthesis is ready) -->
+          <template x-if="synthesis && !synthesisLoading">
+            <div class="flex items-center gap-1">
+              <!-- Copy -->
+              <button @click="copySynthesis()"
+                      class="synthesis-action-btn"
+                      :class="synthesisCopied ? 'text-green-600' : 'text-slate-400 hover:text-slate-700'"
+                      title="Copy to clipboard">
+                <template x-if="!synthesisCopied">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                  </svg>
+                </template>
+                <template x-if="synthesisCopied">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                  </svg>
+                </template>
+              </button>
+              <!-- Trust toggle -->
+              <button @click="synthesisTrusted = !synthesisTrusted"
+                      :class="synthesisTrusted
+                        ? 'synthesis-trust-btn trusted'
+                        : 'synthesis-trust-btn'"
+                      title="Mark as clinically reviewed">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                </svg>
+                <span x-text="synthesisTrusted ? 'Reviewed' : 'Mark reviewed'"></span>
+              </button>
+            </div>
+          </template>
+        </div>
+
+        <!-- Synthesis body -->
+        <div class="px-5 py-4">
+          <template x-if="synthesis && !synthesisLoading">
+            <p class="text-slate-700 text-sm leading-relaxed synthesis-text"
+               x-text="synthesis.synthesis"></p>
+          </template>
+          <template x-if="synthesisLoading">
+            <div class="space-y-2">
+              <div class="synthesis-skeleton h-4 w-full rounded"></div>
+              <div class="synthesis-skeleton h-4 w-5/6 rounded"></div>
+              <div class="synthesis-skeleton h-4 w-4/6 rounded"></div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Trusted badge (shown when marked) -->
+        <template x-if="synthesisTrusted">
+          <div class="px-5 pb-3">
+            <span class="inline-flex items-center gap-1.5 text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-3 py-1">
+              <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+              </svg>
+              Clinically reviewed
+            </span>
+          </div>
+        </template>
+      </div>
+
+      <!-- Match cards -->
+      <div class="flex flex-col gap-4 mb-6">
+        <template x-for="(match, mi) in (results?.matches || [])" :key="mi">
+          <div class="match-card bg-white p-5">
+            <!-- Score + source header -->
+            <div class="flex items-start gap-3 mb-3">
+              <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="font-semibold text-slate-800 text-sm" x-text="'Match #' + (mi + 1)"></span>
+                  <span x-show="match.rerankerScore !== null && match.rerankerScore !== undefined"
+                        class="text-xs text-slate-400"
+                        x-text="'reranker: ' + (match.rerankerScore?.toFixed(3) || '')"></span>
+                </div>
+                <div class="text-xs text-slate-400 font-mono mb-2" x-text="match.source + (match.context ? ' › ' + match.context : '')"></div>
+                <!-- Score bar -->
+                <div class="flex items-center gap-2">
+                  <div class="score-bar-track flex-1">
+                    <div class="score-bar-fill"
+                         :class="match.score >= 0.7 ? 'high' : match.score >= 0.5 ? 'mid' : 'low'"
+                         :style="'width:' + (match.score * 100).toFixed(0) + '%'"></div>
+                  </div>
+                  <span class="text-xs font-semibold text-slate-600 w-10 text-right"
+                        x-text="(match.score * 100).toFixed(0) + '%'"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Content preview -->
+            <p class="text-slate-600 text-sm leading-relaxed line-clamp-4 mb-3"
+               x-text="match.content?.substring(0, 400) + (match.content?.length > 400 ? '…' : '')"></p>
+
+            <!-- Evidence accordion -->
+            <template x-if="match.evidence && match.evidence.length > 0">
+              <details class="border-t border-slate-100 pt-3">
+                <summary class="cursor-pointer text-xs font-semibold text-slate-500 uppercase tracking-wide hover:text-blue-600 flex items-center gap-2 select-none">
+                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M9 9a2 2 0 114 0 2 2 0 01-4 0z"/>
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a4 4 0 00-3.446 6.032l-2.261 2.26a1 1 0 101.414 1.415l2.261-2.261A4 4 0 1011 5z" clip-rule="evenodd"/>
+                  </svg>
+                  Knowledge Graph Evidence (<span x-text="match.evidence.length"></span> facts)
+                </summary>
+                <div class="mt-2 flex flex-col gap-1.5">
+                  <template x-for="(fact, fi) in match.evidence" :key="fi">
+                    <div class="evidence-row">
+                      <span class="font-semibold text-slate-700" x-text="fact.head"></span>
+                      <span class="rel-badge" x-text="fact.relation"></span>
+                      <span class="font-semibold text-slate-700" x-text="fact.tail"></span>
+                      <span class="ml-auto flex items-center gap-1.5">
+                        <span class="tier-badge"
+                              :class="'tier-' + (fact.tier || 2)"
+                              x-text="['', 'Literal', 'Stated', 'Inferred'][fact.tier || 2] || 'Stated'"></span>
+                        <button
+                          x-show="fact.byteStart !== null && fact.byteStart !== undefined"
+                          @click="verifyFact(fact, match.source)"
+                          class="text-blue-600 hover:text-blue-800 text-xs underline underline-offset-2"
+                        >Verify</button>
+                      </span>
+                    </div>
+                  </template>
+                </div>
+              </details>
+            </template>
+
+            <!-- No evidence note -->
+            <template x-if="!match.evidence || match.evidence.length === 0">
+              <p class="text-xs text-slate-400 border-t border-slate-100 pt-3 mt-2">
+                No graph evidence linked to this chunk (run <code>make ingestion-neo4j-build</code> to populate).
+              </p>
+            </template>
+
+            <!-- Debug visualization (collapsed by default) -->
+            <details class="border-t border-slate-100 pt-3 mt-2"
+                     @toggle="if ($event.target.open) loadDebugData(mi, match)">
+              <summary class="cursor-pointer text-xs font-semibold text-slate-500 uppercase tracking-wide hover:text-violet-600 flex items-center gap-2 select-none">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                </svg>
+                Debug Visualization
+              </summary>
+
+              <!-- Loading -->
+              <template x-if="debugData[mi]?.loading">
+                <div class="flex items-center gap-2 text-xs text-slate-400 mt-2 py-1">
+                  <div class="spinner"></div>
+                  Computing similarity heatmap &amp; subgraph…
+                </div>
+              </template>
+
+              <!-- Error -->
+              <template x-if="debugData[mi]?.error">
+                <p class="text-xs text-red-400 mt-2" x-text="'Debug error: ' + debugData[mi].error"></p>
+              </template>
+
+              <!-- Content (heatmap + subgraph + logits) -->
+              <template x-if="debugData[mi] && !debugData[mi].loading && !debugData[mi].error">
+                <div class="mt-3 space-y-4">
+
+                  <!-- Sentence-level similarity heatmap -->
+                  <template x-if="debugData[mi]?.heatmap?.sentences?.length > 0">
+                    <div>
+                      <div class="text-xs text-slate-400 mb-2 font-mono">
+                        Query→chunk sentence similarity · BGE-small cosine
+                      </div>
+                      <div class="flex flex-col gap-1">
+                        <template x-for="(sent, si) in debugData[mi].heatmap.sentences" :key="si">
+                          <div class="relative rounded text-xs leading-snug px-2 py-1 pr-12"
+                               :style="'background: rgba(59,130,246,' + Math.max(0.04, sent.score * 0.85).toFixed(2) + ')'">
+                            <span class="text-slate-800" x-text="sent.text"></span>
+                            <span class="absolute right-1.5 top-1 text-slate-500 font-mono tabular-nums"
+                                  x-text="(sent.score * 100).toFixed(0) + '%'"></span>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- Neo4j subgraph force graph -->
+                  <template x-if="debugData[mi]?.subgraph?.nodes?.length > 0">
+                    <div>
+                      <div class="text-xs text-slate-400 mb-2 font-mono">
+                        Neo4j subgraph ·
+                        <span x-text="debugData[mi].subgraph.entity" class="text-slate-600 font-semibold"></span> ·
+                        <span x-text="debugData[mi].subgraph.nodes.length"></span> nodes ·
+                        <span x-text="debugData[mi].subgraph.links.length"></span> edges
+                      </div>
+                      <div class="rounded border border-slate-200 bg-slate-50 overflow-hidden"
+                           style="height:380px">
+                        <svg :id="'subgraph-' + mi" class="w-full h-full"></svg>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- Reranker + vector scores -->
+                  <div class="text-xs font-mono text-slate-400 flex gap-4 flex-wrap">
+                    <span>Reranker logit:
+                      <span class="text-violet-600 font-semibold"
+                            x-text="match.rerankerScore != null ? match.rerankerScore.toFixed(4) : 'n/a'"></span>
+                    </span>
+                    <span>Vector score:
+                      <span class="text-blue-600 font-semibold"
+                            x-text="match.score != null ? match.score.toFixed(4) : 'n/a'"></span>
+                    </span>
+                    <span>Chunk index:
+                      <span class="text-slate-600 font-semibold" x-text="match.chunkIndex ?? 'n/a'"></span>
+                    </span>
+                  </div>
+
+                </div>
+              </template>
+            </details>
+
+          </div>
+        </template>
+      </div>
+
+      <!-- Graph facts (raw) -->
+      <template x-if="results?.graphFacts?.length > 0">
+        <details class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-4">
+          <summary class="cursor-pointer text-sm font-semibold text-slate-600 hover:text-blue-600 select-none">
+            Raw Graph Facts (<span x-text="results.graphFacts.length"></span>)
+          </summary>
+          <ul class="mt-3 flex flex-col gap-1">
+            <template x-for="(fact, i) in results.graphFacts" :key="i">
+              <li class="text-xs font-mono text-slate-500 py-1 border-b border-slate-50" x-text="fact"></li>
+            </template>
+          </ul>
+        </details>
+      </template>
+
+      <!-- Audit trail -->
+      <details class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+        <summary class="cursor-pointer text-sm font-semibold text-slate-600 hover:text-blue-600 select-none">
+          Audit Trail — Execution <span x-text="results?.executionId" class="font-mono"></span>
+        </summary>
+        <pre class="audit-json mt-3" x-text="JSON.stringify(results, null, 2)"></pre>
+      </details>
+    </section>
+
+  </main>
+
+  <!-- ── VERIFY MODAL ───────────────────────────────────────────────────────── -->
+  <div class="modal-overlay" x-show="verifyData" @click.self="verifyData = null">
+    <div class="modal-box verify-modal-wide" x-show="verifyData">
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div>
+          <h3 class="font-semibold text-slate-800">Source Verification</h3>
+          <template x-if="verifyData">
+            <p class="text-xs text-slate-500 font-mono mt-0.5">
+              <span x-text="verifyData.source"></span>
+              · bytes <span x-text="verifyData.byteStart"></span>–<span x-text="verifyData.byteEnd"></span>
+            </p>
+          </template>
+        </div>
+        <button @click="verifyData = null" class="text-slate-400 hover:text-slate-600 text-2xl leading-none ml-4">×</button>
+      </div>
+
+      <template x-if="verifyData">
+        <div>
+          <!-- Loading -->
+          <template x-if="verifyData.loading">
+            <div class="flex items-center gap-2 text-sm text-slate-500 px-6 py-8">
+              <div class="spinner"></div>
+              <span>Loading source…</span>
+            </div>
+          </template>
+
+          <!-- Error -->
+          <template x-if="verifyData.error">
+            <p class="text-red-600 text-sm px-6 py-4" x-text="verifyData.error"></p>
+          </template>
+
+          <!-- Content: PDF + snippet side by side -->
+          <template x-if="!verifyData.loading && !verifyData.error">
+            <div class="verify-layout">
+
+              <!-- Left: PDF viewer (only if pdfUrl available) -->
+              <template x-if="verifyData.pdfUrl">
+                <div class="verify-pdf-panel">
+                  <div class="px-4 pt-3 pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-100">
+                    Source PDF
+                  </div>
+                  <iframe
+                    :src="verifyData.pdfUrl + '#toolbar=1&navpanes=0'"
+                    class="verify-pdf-iframe"
+                    type="application/pdf"
+                  ></iframe>
+                </div>
+              </template>
+
+              <!-- Right: extracted text snippet -->
+              <div class="verify-snippet-panel" :class="!verifyData.pdfUrl ? 'verify-snippet-full' : ''">
+                <div class="px-4 pt-3 pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-100">
+                  Extracted Text · byte range
+                  <span class="text-slate-400 font-normal normal-case"
+                        x-text="verifyData.byteStart + '–' + verifyData.byteEnd"></span>
+                </div>
+                <div class="p-4 overflow-y-auto" style="max-height: 520px">
+                  <template x-if="verifyData.snippet">
+                    <pre class="snippet-pre" x-text="verifyData.snippet"></pre>
+                  </template>
+                </div>
+              </div>
+
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- ── ALPINE APP ─────────────────────────────────────────────────────────── -->
+  <script src="js/api.js"></script>
+  <script>
+    // ── D3 Force Graph ────────────────────────────────────────────────────────
+    function renderSubgraph(containerId, data) {
+      const el = document.getElementById(containerId);
+      if (!el || typeof d3 === 'undefined') return;
+
+      const { nodes: rawNodes, links: rawLinks } = data;
+      if (!rawNodes.length) return;
+
+      const nodes = rawNodes.map(n => ({ ...n }));
+      const links = rawLinks.map(l => ({ ...l }));
+
+      const W = el.clientWidth  || 420;
+      const H = el.clientHeight || 380;
+
+      const tierColor = { 1: '#22c55e', 2: '#3b82f6', 3: '#f97316' };
+      const abbrev = s => {
+        // First meaningful word ≤ 10 chars, else truncate
+        const w = s.replace(/[()>=<]/g, '').trim().split(/\s+/)[0];
+        return w.length <= 10 ? w : w.slice(0, 9) + '…';
+      };
+
+      d3.select(el).selectAll('*').remove();
+
+      const svg = d3.select(el)
+        .attr('viewBox', `0 0 ${W} ${H}`)
+        .style('cursor', 'grab');
+
+      // Zoom / pan
+      const g = svg.append('g');
+      svg.call(d3.zoom().scaleExtent([0.4, 3]).on('zoom', e => g.attr('transform', e.transform)));
+
+      // Defs — arrow markers + clip path for labels
+      const defs = svg.append('defs');
+      [1, 2, 3].forEach(t => {
+        defs.append('marker')
+          .attr('id', `arr-${t}-${containerId}`)
+          .attr('viewBox', '0 -4 8 8')
+          .attr('refX', 18).attr('refY', 0)
+          .attr('markerWidth', 5).attr('markerHeight', 5)
+          .attr('orient', 'auto')
+          .append('path').attr('d', 'M0,-4L8,0L0,4')
+          .attr('fill', tierColor[t] || '#94a3b8');
+      });
+
+      // Tier legend (top-right)
+      const legend = svg.append('g').attr('transform', `translate(${W - 90}, 10)`);
+      [[1,'Literal'],[2,'Stated'],[3,'Inferred']].forEach(([t, label], i) => {
+        const row = legend.append('g').attr('transform', `translate(0, ${i * 16})`);
+        row.append('rect').attr('width', 8).attr('height', 8).attr('rx', 2).attr('fill', tierColor[t]).attr('y', 0);
+        row.append('text').attr('x', 12).attr('y', 7).attr('font-size', 9).attr('fill', '#6b7280').text(label);
+      });
+
+      const sim = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(d => (d.tier === 1 ? 95 : 115)))
+        .force('charge', d3.forceManyBody().strength(-220))
+        .force('center', d3.forceCenter(W / 2, H / 2))
+        .force('collide', d3.forceCollide(38))
+        .force('radial', d3.forceRadial(d => d.isRoot ? 0 : 110, W / 2, H / 2).strength(d => d.isRoot ? 1 : 0.12));
+
+      // Links
+      const link = g.append('g').attr('class', 'links').selectAll('line').data(links).join('line')
+        .attr('stroke', d => tierColor[d.tier] || '#cbd5e1')
+        .attr('stroke-width', 1.5)
+        .attr('stroke-opacity', 0.65)
+        .attr('marker-end', d => `url(#arr-${d.tier || 2}-${containerId})`);
+
+      // Edge labels (relation type) — abbreviated
+      const linkLabel = g.append('g').attr('class', 'link-labels').selectAll('text').data(links).join('text')
+        .attr('font-size', 7.5)
+        .attr('fill', '#9ca3af')
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .text(d => d.label.replace(/_/g, ' '));
+
+      // Node groups
+      const nodeG = g.append('g').attr('class', 'nodes').selectAll('g').data(nodes).join('g')
+        .style('cursor', 'pointer')
+        .call(d3.drag()
+          .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+          .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
+          .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+        );
+
+      // Circle + glow for root
+      nodeG.append('circle')
+        .attr('r', d => d.isRoot ? 14 : 9)
+        .attr('fill', d => d.isRoot ? '#6366f1' : '#f1f5f9')
+        .attr('stroke', d => d.isRoot ? '#4338ca' : '#94a3b8')
+        .attr('stroke-width', d => d.isRoot ? 2.5 : 1.5)
+        .attr('filter', d => d.isRoot ? 'drop-shadow(0 0 5px rgba(99,102,241,0.55))' : null);
+
+      // Abbreviated label inside circle
+      nodeG.append('text')
+        .attr('font-size', d => d.isRoot ? 8 : 7)
+        .attr('fill', d => d.isRoot ? '#fff' : '#334155')
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'middle')
+        .style('pointer-events', 'none')
+        .text(d => abbrev(d.label));
+
+      // Floating tooltip (shared, one DOM element)
+      const tip = svg.append('g').attr('class', 'tooltip').style('display', 'none').style('pointer-events', 'none');
+      const tipRect = tip.append('rect').attr('rx', 4).attr('fill', '#1e293b').attr('fill-opacity', 0.92);
+      const tipText = tip.append('text').attr('fill', '#f1f5f9').attr('font-size', 10).attr('dominant-baseline', 'middle');
+
+      nodeG
+        .on('mouseover', (e, d) => {
+          const words = d.label.split(' ');
+          // Wrap at 35 chars per line
+          const lines = [];
+          let cur = '';
+          words.forEach(w => {
+            if ((cur + ' ' + w).trim().length > 35) { lines.push(cur.trim()); cur = w; }
+            else cur = (cur + ' ' + w).trim();
+          });
+          if (cur) lines.push(cur);
+
+          tipText.selectAll('tspan').remove();
+          lines.forEach((line, i) => {
+            tipText.append('tspan').attr('x', 8).attr('dy', i === 0 ? 0 : 13).text(line);
+          });
+          const bbox = tipText.node().getBBox();
+          tipRect.attr('x', 0).attr('y', bbox.y - 4).attr('width', bbox.width + 16).attr('height', bbox.height + 8);
+
+          // Position tooltip near cursor within SVG bounds
+          const svgRect = el.getBoundingClientRect();
+          let tx = e.clientX - svgRect.left + 10;
+          let ty = e.clientY - svgRect.top - 10;
+          const tw = bbox.width + 16;
+          const th = bbox.height + 8;
+          if (tx + tw > W - 10) tx = tx - tw - 20;
+          if (ty + th > H - 10) ty = H - th - 10;
+          tip.attr('transform', `translate(${tx}, ${ty})`).style('display', null);
+        })
+        .on('mousemove', (e) => {
+          const svgRect = el.getBoundingClientRect();
+          const bbox = tipRect.node().getBBox();
+          let tx = e.clientX - svgRect.left + 10;
+          let ty = e.clientY - svgRect.top - 10;
+          if (tx + bbox.width > W - 10) tx = tx - bbox.width - 20;
+          if (ty + bbox.height > H - 10) ty = H - bbox.height - 10;
+          tip.attr('transform', `translate(${tx}, ${ty})`);
+        })
+        .on('mouseleave', () => tip.style('display', 'none'));
+
+      sim.on('tick', () => {
+        link
+          .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+          .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+        linkLabel
+          .attr('x', d => (d.source.x + d.target.x) / 2)
+          .attr('y', d => (d.source.y + d.target.y) / 2 - 4);
+        nodeG.attr('transform', d => `translate(${d.x},${d.y})`);
+      });
+    }
+  </script>
+  <script>
+    function app() {
+      return {
+        state: 'idle',  // idle | loading | results | error
+        query: '',
+        csvFile: null,
+        loadingStep: 0,
+        pipelineSteps: [
+          'Encoding query (BGE-small)',
+          'Vector search (Qdrant)',
+          'Reranking candidates (BGE-reranker)',
+          'Graph enrichment (Neo4j)',
+          'Assembling results',
+        ],
+        results: null,
+        stats: null,
+        verifyData: null,
+        debugData: {},   // keyed by match index
+        errorMessage: '',
+        synthesis: null,        // { text, model, tokensUsed }
+        synthesisLoading: false,
+        synthesisCopied: false,
+        synthesisTrusted: false,
+
+        async init() {
+          try {
+            this.stats = await window.API.getStats();
+          } catch (_) {
+            // stats are optional — don't block
+          }
+        },
+
+        onCsvChange(event) {
+          this.csvFile = event.target.files?.[0] || null;
+        },
+
+        reset() {
+          this.state = 'idle';
+          this.results = null;
+          this.errorMessage = '';
+          this.loadingStep = 0;
+          this.synthesis = null;
+          this.synthesisLoading = false;
+          this.synthesisCopied = false;
+          this.synthesisTrusted = false;
+        },
+
+        async submit() {
+          if (!this.query.trim() || this.state === 'loading') return;
+          this.state = 'loading';
+          this.loadingStep = 0;
+          this.results = null;
+          this.errorMessage = '';
+          this.synthesis = null;
+          this.synthesisTrusted = false;
+
+          // Animate pipeline steps
+          const stepInterval = setInterval(() => {
+            if (this.loadingStep < this.pipelineSteps.length - 1) {
+              this.loadingStep++;
+            }
+          }, 700);
+
+          try {
+            const data = await window.API.matchTrials(this.query, this.csvFile);
+            this.results = data;
+            this.loadingStep = this.pipelineSteps.length;
+            this.state = 'results';
+            // Fire synthesis asynchronously — don't block result display
+            this._triggerSynthesis(data);
+          } catch (err) {
+            this.errorMessage = err.message || 'Unknown error';
+            this.state = 'error';
+          } finally {
+            clearInterval(stepInterval);
+          }
+        },
+
+        async _triggerSynthesis(data) {
+          const evidence = (data.matches || []).flatMap(m => m.evidence || []);
+          if (!evidence.length) return;
+          this.synthesisLoading = true;
+          try {
+            const res = await window.API.synthesize(data.query || this.query, evidence);
+            this.synthesis = res;
+          } catch (_) {
+            // Synthesis is non-critical — fail silently
+            this.synthesis = null;
+          } finally {
+            this.synthesisLoading = false;
+          }
+        },
+
+        async copySynthesis() {
+          if (!this.synthesis?.synthesis) return;
+          await navigator.clipboard.writeText(this.synthesis.synthesis);
+          this.synthesisCopied = true;
+          setTimeout(() => { this.synthesisCopied = false; }, 2000);
+        },
+
+        async verifyFact(fact, matchSource) {
+          const source = fact.source || matchSource;
+          this.verifyData = {
+            source,
+            byteStart: fact.byteStart,
+            byteEnd: fact.byteEnd,
+            loading: true,
+            snippet: null,
+            error: null,
+          };
+          try {
+            const res = await window.API.verifyChunk(source, fact.byteStart, fact.byteEnd);
+            this.verifyData = {
+              ...this.verifyData,
+              loading: false,
+              snippet: res.snippet,
+              pdfUrl: res.pdf_url ? `http://localhost:8000${res.pdf_url}` : null,
+            };
+          } catch (err) {
+            this.verifyData = { ...this.verifyData, loading: false, error: err.message };
+          }
+        },
+
+        async loadDebugData(mi, match) {
+          if (this.debugData[mi] && !this.debugData[mi].error) return;
+          this.debugData = { ...this.debugData, [mi]: { loading: true, heatmap: null, subgraph: null, error: null } };
+
+          try {
+            const firstEntity = match.evidence?.[0]?.head ?? null;
+            const [heatmap, subgraph] = await Promise.all([
+              window.API.getHeatmap(this.query, match.chunkIndex),
+              firstEntity ? window.API.getSubgraph(firstEntity) : Promise.resolve(null),
+            ]);
+            this.debugData = { ...this.debugData, [mi]: { loading: false, heatmap, subgraph, error: null } };
+            if (subgraph?.nodes?.length) {
+              // Give Alpine one tick to render the SVG element before D3 touches it
+              setTimeout(() => renderSubgraph('subgraph-' + mi, subgraph), 60);
+            }
+          } catch (err) {
+            this.debugData = { ...this.debugData, [mi]: { loading: false, heatmap: null, subgraph: null, error: err.message } };
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

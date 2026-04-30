@@ -70,6 +70,7 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	reasoning-download-models reasoning-sglang-run reasoning-sglang-run-query \
 	reasoning-sglang-run-temporal reasoning-sglang-run-temporal-hitl \
 	reasoning-temporal-run-sglang reasoning-temporal-run-hitl-sglang reasoning-serve-api \
+	simple-ui-serve \
 	acquisition-install acquisition-test acquisition-fetch acquisition-source-validate \
 	acquisition-source-search acquisition-source-fetch \
 	ingestion-install ingestion-test ingestion-test-processors ingestion-test-embedder \
@@ -429,6 +430,11 @@ reasoning-temporal-run-hitl-sglang: ## Run one Temporal HITL query against SGLan
 
 reasoning-serve-api: ## Start the FastAPI backend
 	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --host 0.0.0.0 --port 8000 --reload
+
+simple-ui-serve: ## Serve simple-ui on http://localhost:5500 (run reasoning-serve-api in another terminal first)
+	@echo "→  UI:  http://localhost:5500"
+	@echo "→  API: http://localhost:8000  (start with: make reasoning-serve-api)"
+	@cd simple-ui && python3 -m http.server 5500
 
 acquisition-install: ## Create acquisition venv if needed and install editable package
 	@cd $(ACQUISITION_DIR) && \

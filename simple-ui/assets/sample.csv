@@ -1,0 +1,4 @@
+patient_id,age,primary_diagnosis,medications,lab_values,notes
+P001,67,sepsis,"norepinephrine; vasopressin","lactate: 4.2mmol/L; creatinine: 2.8mg/dL; WBC: 22.1","ICU day 1 — Sepsis-3 criteria met; two organ failures"
+P002,54,severe sepsis — qSOFA 2,"piperacillin-tazobactam; IV crystalloid bolus 30mL/kg","WBC: 18.2; CRP: 142; lactate: 2.4mmol/L","ED presentation — SEP-1 bundle initiated; blood cultures pending"
+P003,71,septic shock,"hydrocortisone 200mg/day; norepinephrine 0.3mcg/kg/min","MAP: 58 on vasopressors; lactate: 6.1; SOFA: 11","Post-op abdominal sepsis — diverges from CMS SEP-1 protocol criteria"

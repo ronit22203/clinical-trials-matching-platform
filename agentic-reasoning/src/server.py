@@ -13,20 +13,26 @@ Start with:
   (or: make serve-api in the agentic-reasoning directory)
 """
 
+import csv
+import glob as _glob
+import io
+import json
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from .config_loader import load_agent_config
+from .config_loader import load_agent_config, load_app_config
 from .agent import SimpleAgent
 
 # Lazy-loaded to avoid startup cost when tools aren't configured
@@ -38,6 +44,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
 # ── Output sanitization ────────────────────────────────────────────────────────
 
 def _sanitize_output(text: str) -> str:
@@ -45,6 +53,23 @@ def _sanitize_output(text: str) -> str:
     text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
     text = text.replace("<think>", "").replace("</think>", "")
     return text.strip()
+
+
+# ── GraphRAG singleton ────────────────────────────────────────────────────────
+
+_graphrag_tool_instance = None
+
+
+def _get_graphrag_tool():
+    """Lazy singleton for GraphRAGTool — loads embedding/reranker models once."""
+    global _graphrag_tool_instance
+    if _graphrag_tool_instance is None:
+        from .tools.implementations.graphrag_tools import GraphRAGTool
+        app_cfg = load_app_config()
+        tool_cfg = app_cfg["agentic_reasoning"]["tools"]["graphrag"]["config"]
+        _graphrag_tool_instance = GraphRAGTool(tool_cfg)
+        logger.info("GraphRAGTool singleton initialised")
+    return _graphrag_tool_instance
 
 
 # ── Application ───────────────────────────────────────────────────────────────
@@ -60,6 +85,10 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "http://localhost:8080",
+        "null",  # file:// origin for local dev
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -131,6 +160,74 @@ class HealthResponse(BaseModel):
     version: str = "0.1.0"
 
 
+class EvidenceFact(CamelModel):
+    head: str
+    relation: str
+    tail: str
+    tier: int = 2
+    byte_start: int | None = None
+    byte_end: int | None = None
+    chunk_id: int | None = None
+
+
+class MatchResult(CamelModel):
+    score: float
+    reranker_score: float | None = None
+    content: str
+    source: str
+    context: str | None = None
+    chunk_id: int | None = None
+    chunk_index: int | None = None
+    evidence: list[EvidenceFact] = Field(default_factory=list)
+
+
+class MatchResponse(CamelModel):
+    execution_id: str
+    query: str
+    keywords: list[str]
+    matches: list[MatchResult]
+    graph_facts: list[str]
+    latency_ms: int
+
+
+class SynthesisEvidenceFact(BaseModel):
+    head: str
+    relation: str
+    tail: str
+    tier: int = 2
+
+
+class SynthesisRequest(BaseModel):
+    query: str
+    evidence: list[SynthesisEvidenceFact]
+
+
+class SynthesisResponse(CamelModel):
+    synthesis: str
+    model: str
+    tokens_used: int
+
+
+class VerifyResponse(BaseModel):
+    source: str
+    byte_start: int
+    byte_end: int
+    snippet: str
+    pdf_url: Optional[str] = None
+
+
+class StatsResponse(BaseModel):
+    run_id: str
+    recall_at_5: float
+    ndcg_at_5: float
+    mrr: float
+    hit_rate_at_5: float
+    entity_f1_relaxed: float
+    ttft_p50_ms: float
+    throughput_tok_s: float
+    failure_rate: float
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _build_audit_entries(
@@ -189,6 +286,359 @@ def _build_audit_entries(
 @app.get("/api/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+@app.post("/api/match", response_model=MatchResponse)
+async def match_trials(
+    query: str = Form(...),
+    file: UploadFile | None = File(default=None),
+) -> MatchResponse:
+    start = time.monotonic()
+    execution_id = str(uuid.uuid4())[:8]
+
+    # Build effective query — optionally augmented from first CSV row
+    effective_query = query.strip()
+    if file is not None:
+        try:
+            raw_bytes = await file.read()
+            reader = csv.DictReader(io.StringIO(raw_bytes.decode("utf-8")))
+            rows = list(reader)
+            if rows:
+                parts = [effective_query] if effective_query else []
+                for key, val in rows[0].items():
+                    if val and key.lower() not in ("patient_id", "id"):
+                        parts.append(f"{key}: {val}")
+                effective_query = ". ".join(parts)
+        except Exception as exc:
+            logger.warning("CSV parse failed: %s", exc)
+
+    if not effective_query:
+        raise HTTPException(status_code=422, detail="query or non-empty CSV required")
+
+    # Call the GraphRAG tool
+    try:
+        tool = _get_graphrag_tool()
+    except Exception as exc:
+        logger.error("GraphRAGTool init failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=503, detail=f"Tool unavailable: {exc}") from exc
+
+    try:
+        raw = tool.execute(effective_query)
+    except Exception as exc:
+        logger.error("GraphRAG execute failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Retrieval error: {exc}") from exc
+
+    if isinstance(raw, str):
+        raise HTTPException(status_code=500, detail=raw)
+
+    vector_results: list[dict] = raw.get("vector_results", [])
+    graph_facts: list[str] = raw.get("graph_facts", [])
+    keywords: list[str] = raw.get("keywords", [])
+
+    # Fetch structured evidence (tier + byte-range) from Neo4j
+    doi_prefixes: list[str] = []
+    for vr in vector_results:
+        src = vr.get("source", "")
+        doi = re.sub(r"_cleaned\.md$", "", src) if src else ""
+        if doi and doi not in doi_prefixes:
+            doi_prefixes.append(doi)
+
+    evidence_by_chunk_index: dict[int, list[EvidenceFact]] = {}
+    all_evidence: list[EvidenceFact] = []
+
+    if doi_prefixes:
+        try:
+            driver = tool._neo4j_driver()
+            cypher = """
+                MATCH (h)-[r]->(t)
+                WHERE any(doi IN $dois WHERE r.source CONTAINS doi)
+                RETURN h.name AS head, type(r) AS relation, t.name AS tail,
+                       r.tier AS tier, r.byte_start AS byte_start,
+                       r.byte_end AS byte_end, r.chunk_id AS chunk_id
+                LIMIT 60
+            """
+            with driver.session() as session:
+                records = list(session.run(cypher, dois=doi_prefixes))
+
+            for rec in records:
+                fact = EvidenceFact(
+                    head=rec["head"],
+                    relation=rec["relation"],
+                    tail=rec["tail"],
+                    tier=rec["tier"] or 2,
+                    byte_start=rec["byte_start"],
+                    byte_end=rec["byte_end"],
+                    chunk_id=rec["chunk_id"],
+                )
+                all_evidence.append(fact)
+                cid = rec["chunk_id"]
+                if cid is not None:
+                    evidence_by_chunk_index.setdefault(int(cid), []).append(fact)
+        except Exception as exc:
+            logger.warning("Structured evidence query failed: %s", exc)
+
+    # Assemble MatchResult list — deduplicate by chunk_index then content prefix
+    matches: list[MatchResult] = []
+    seen_keys: set[str] = set()
+    for i, vr in enumerate(vector_results):
+        chunk_index = vr.get("chunk_index")
+        dedup_key = str(chunk_index) if chunk_index is not None else vr.get("content", "")[:120]
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+
+        if chunk_index is not None and chunk_index in evidence_by_chunk_index:
+            evidence = evidence_by_chunk_index[chunk_index][:10]
+        elif not matches and all_evidence:
+            evidence = all_evidence[:10]
+        else:
+            evidence = []
+
+        matches.append(MatchResult(
+            score=vr.get("score", 0.0),
+            reranker_score=vr.get("reranker_score"),
+            content=vr.get("content", ""),
+            source=vr.get("source", ""),
+            context=vr.get("context"),
+            chunk_id=vr.get("chunk_id"),
+            chunk_index=chunk_index,
+            evidence=evidence,
+        ))
+
+    latency_ms = int((time.monotonic() - start) * 1000)
+    return MatchResponse(
+        execution_id=execution_id,
+        query=effective_query,
+        keywords=keywords,
+        matches=matches,
+        graph_facts=graph_facts,
+        latency_ms=latency_ms,
+    )
+
+
+# ── Tier labels used in synthesis prompt ─────────────────────────────────────
+_TIER_LABEL = {1: "verbatim", 2: "stated", 3: "inferred"}
+
+_SYNTHESIS_SYSTEM = (
+    "You are a clinical research assistant. Synthesise a concise, evidence-grounded answer "
+    "to the clinical query below. Base your answer ONLY on the structured evidence provided. "
+    "Do not hallucinate. Be precise. Write 3-5 sentences maximum."
+)
+
+
+@app.post("/api/synthesis", response_model=SynthesisResponse)
+async def synthesize(request: SynthesisRequest) -> SynthesisResponse:
+    """Generate a concise LLM synthesis from structured evidence facts."""
+    if not request.evidence:
+        raise HTTPException(status_code=400, detail="No evidence provided")
+
+    facts_text = "\n".join(
+        f"- {f.head} {f.relation} {f.tail} [{_TIER_LABEL.get(f.tier, 'stated')}]"
+        for f in request.evidence
+    )
+    user_msg = f"EVIDENCE:\n{facts_text}\n\nQUERY: {request.query}"
+
+    try:
+        app_cfg = load_app_config()
+        model_str: str = app_cfg["agentic_reasoning"]["agent"]["model"]
+    except Exception:
+        model_str = "lmstudio/qwen3-8b"
+
+    try:
+        from .llm_factory import build_llm
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        llm = build_llm(model_str, temperature=0.1, max_tokens=512)
+        response = await llm.ainvoke([
+            SystemMessage(content=_SYNTHESIS_SYSTEM),
+            HumanMessage(content=user_msg),
+        ])
+        synthesis_text = _sanitize_output(str(response.content))
+        tokens_used = (
+            response.usage_metadata.get("output_tokens", 0)
+            if hasattr(response, "usage_metadata") and response.usage_metadata
+            else 0
+        )
+    except Exception as exc:
+        logger.warning("Synthesis LLM call failed: %s", exc)
+        raise HTTPException(status_code=503, detail=f"LLM unavailable: {exc}") from exc
+
+    # model_str is "provider/model-name" — return just the model name for display
+    display_model = model_str.split("/", 1)[-1] if "/" in model_str else model_str
+    return SynthesisResponse(
+        synthesis=synthesis_text,
+        model=display_model,
+        tokens_used=tokens_used,
+    )
+
+
+@app.get("/api/pdf/{doi_path:path}")
+async def get_pdf(doi_path: str) -> FileResponse:
+    pattern = str(_REPO_ROOT / "data" / "pdfs" / "raw" / "**" / doi_path / "paper.pdf")
+    found = _glob.glob(pattern, recursive=True)
+    if not found:
+        raise HTTPException(status_code=404, detail=f"PDF not found for: {doi_path}")
+    return FileResponse(found[0], media_type="application/pdf")
+
+
+
+
+@app.get("/api/debug/heatmap")
+async def debug_heatmap(query: str, chunk_index: int) -> dict:
+    """Sentence-level cosine similarity between query and each sentence in the chunk."""
+    import numpy as np
+    import re as _re
+
+    tool = _get_graphrag_tool()
+
+    # Fetch chunk text from Qdrant
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    try:
+        pts, _ = tool._qdrant_client().scroll(
+            tool.config["collection"],
+            scroll_filter=Filter(must=[
+                FieldCondition(key="chunk_index", match=MatchValue(value=chunk_index))
+            ]),
+            limit=1,
+            with_payload=True,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Qdrant error: {exc}") from exc
+
+    if not pts:
+        raise HTTPException(status_code=404, detail=f"No chunk with index {chunk_index}")
+
+    chunk_text: str = pts[0].payload.get("content", "")
+    context: str = pts[0].payload.get("context", "")
+
+    # Split into sentences (keep non-empty, min 10 chars)
+    sentences = [s.strip() for s in _re.split(r"(?<=[.!?])\s+", chunk_text) if len(s.strip()) >= 10]
+    if not sentences:
+        sentences = [chunk_text]
+
+    # Embed query + sentences
+    embedder = tool._embedder_model()
+    all_texts = [query] + sentences
+    vecs = embedder.encode(all_texts, show_progress_bar=False)
+
+    query_vec = vecs[0]
+    sent_vecs = vecs[1:]
+
+    # Cosine similarity
+    norms = np.linalg.norm(sent_vecs, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1e-9, norms)
+    sent_vecs_normed = sent_vecs / norms
+    q_norm = np.linalg.norm(query_vec)
+    scores = (sent_vecs_normed @ query_vec / (q_norm + 1e-9)).tolist()
+
+    return {
+        "query": query,
+        "context": context,
+        "chunk_index": chunk_index,
+        "sentences": [
+            {"text": s, "score": round(float(sc), 4)}
+            for s, sc in zip(sentences, scores)
+        ],
+    }
+
+
+@app.get("/api/debug/subgraph/{entity}")
+async def debug_subgraph(entity: str) -> dict:
+    """Return 1-hop Neo4j neighbourhood for a given entity (for D3 force graph)."""
+    tool = _get_graphrag_tool()
+    cypher = """
+        MATCH (n)-[r]-(m)
+        WHERE n.name = $name OR toLower(n.name) CONTAINS toLower($name)
+        RETURN n.name AS src, type(r) AS rel, m.name AS tgt,
+               r.tier AS tier, r.byte_start AS byte_start, r.byte_end AS byte_end
+        LIMIT 30
+    """
+    try:
+        with tool._neo4j_driver().session() as session:
+            records = list(session.run(cypher, name=entity.upper()))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Neo4j error: {exc}") from exc
+
+    nodes_map: dict[str, dict] = {}
+    links = []
+    for rec in records:
+        for n in (rec["src"], rec["tgt"]):
+            if n and n not in nodes_map:
+                nodes_map[n] = {"id": n, "label": n, "isRoot": n.upper() == entity.upper()}
+        if rec["src"] and rec["tgt"]:
+            links.append({
+                "source": rec["src"],
+                "target": rec["tgt"],
+                "label": rec["rel"],
+                "tier": rec["tier"] or 2,
+                "byteStart": rec["byte_start"],
+                "byteEnd": rec["byte_end"],
+            })
+
+    return {
+        "entity": entity.upper(),
+        "nodes": list(nodes_map.values()),
+        "links": links,
+    }
+
+
+@app.get("/api/verify", response_model=VerifyResponse)
+async def verify_chunk(source: str, byte_start: int, byte_end: int) -> VerifyResponse:
+    filename = Path(source).name  # strip any path traversal
+    clean_dir = _REPO_ROOT / "data" / "artifacts" / "clean"
+    file_path = clean_dir / filename
+    if not file_path.exists():
+        # Fall back: the source may be a legacy hash name; find any .md in clean dir
+        candidates = list(clean_dir.glob("*_cleaned.md"))
+        if not candidates:
+            raise HTTPException(status_code=404, detail=f"Source file not found: {filename}")
+        file_path = candidates[0]
+        logger.warning("verify_chunk: %s not found, falling back to %s", filename, file_path.name)
+    text = file_path.read_text(encoding="utf-8")
+    snippet = text[byte_start:byte_end]
+
+    # Resolve PDF url from source stem
+    pdf_url: Optional[str] = None
+    stem = re.sub(r"_cleaned\.md$", "", file_path.name)
+    pdf_hits = _glob.glob(
+        str(_REPO_ROOT / "data" / "pdfs" / "raw" / "**" / stem / "paper.pdf"),
+        recursive=True,
+    )
+    if pdf_hits:
+        pp = Path(pdf_hits[0])
+        doi_path = f"{pp.parent.parent.name}/{pp.parent.name}"
+        pdf_url = f"/api/pdf/{doi_path}"
+
+    return VerifyResponse(
+        source=file_path.name,
+        byte_start=byte_start,
+        byte_end=byte_end,
+        snippet=snippet,
+        pdf_url=pdf_url,
+    )
+
+
+@app.get("/api/stats", response_model=StatsResponse)
+async def get_stats() -> StatsResponse:
+    pattern = str(_REPO_ROOT / "benchmarking" / "results" / "det_*" / "manifest.json")
+    manifests = sorted(_glob.glob(pattern), reverse=True)
+    if not manifests:
+        raise HTTPException(status_code=404, detail="No benchmark results found")
+    with open(manifests[0]) as f:
+        data = json.load(f)
+    run_id = Path(manifests[0]).parent.name
+    s: dict[str, Any] = data.get("summary", {})
+    return StatsResponse(
+        run_id=run_id,
+        recall_at_5=s.get("recall_at_5", 0.0),
+        ndcg_at_5=s.get("ndcg_at_5", 0.0),
+        mrr=s.get("mrr", 0.0),
+        hit_rate_at_5=s.get("hit_rate_at_5", 0.0),
+        entity_f1_relaxed=s.get("entity_f1_relaxed", 0.0),
+        ttft_p50_ms=s.get("ttft_p50_ms", 0.0),
+        throughput_tok_s=s.get("throughput_tok_s", 0.0),
+        failure_rate=s.get("failure_rate", 0.0),
+    )
 
 
 @app.post("/api/query", response_model=QueryResponse)

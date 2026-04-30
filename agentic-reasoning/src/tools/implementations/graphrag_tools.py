@@ -89,7 +89,7 @@ class GraphRAGTool(BaseTool):
             from sentence_transformers import CrossEncoder
             cache_dir = self.config.get("model_cache_dir", "data/models")
             logger.info("Loading reranker: %s", model_name)
-            self._reranker = CrossEncoder(model_name, cache_dir=cache_dir)
+            self._reranker = CrossEncoder(model_name, cache_folder=cache_dir)
         return self._reranker
 
     # ------------------------------------------------------------------
