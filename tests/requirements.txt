@@ -1,0 +1,7 @@
+# Minimal dependencies for the root integration test suite.
+# Uses agentic-reasoning's venv (Python 3.12+) — run via `make test-suite`.
+pytest>=9.0.0
+pyyaml>=6.0
+requests>=2.31.0
+cachetools>=5.3.0
+pydantic>=2.0.0

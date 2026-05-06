@@ -214,6 +214,7 @@ class VerifyResponse(BaseModel):
     byte_end: int
     snippet: str
     pdf_url: Optional[str] = None
+    highlight_url: Optional[str] = None
 
 
 class StatsResponse(BaseModel):
@@ -582,6 +583,116 @@ async def debug_subgraph(entity: str) -> dict:
     }
 
 
+@app.get("/api/verify/highlight")
+async def verify_highlight(source: str, byte_start: int, byte_end: int):
+    """Return full-PDF JPEG with matched paragraph highlighted (disk-cached)."""
+    import fitz
+    from fastapi import Response as _R
+    from PIL import Image as _PILImage
+    import io as _io, hashlib as _hl
+
+    # ── disk cache ────────────────────────────────────────────────────────────
+    cache_dir = _REPO_ROOT / "data" / "artifacts" / "highlight_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_key  = _hl.md5(f"{source}:{byte_start}:{byte_end}".encode()).hexdigest()
+    cache_file = cache_dir / f"{cache_key}.jpg"
+    if cache_file.exists():
+        return _R(content=cache_file.read_bytes(), media_type="image/jpeg",
+                  headers={"Cache-Control": "no-store"})
+
+    filename = Path(source).name
+    clean_dir = _REPO_ROOT / "data" / "artifacts" / "clean"
+    file_path = clean_dir / filename
+    if not file_path.exists():
+        candidates = list(clean_dir.glob("*_cleaned.md"))
+        file_path = candidates[0] if candidates else None
+    if not file_path:
+        raise HTTPException(status_code=404, detail="Source file not found")
+
+    raw_snippet = file_path.read_text(encoding="utf-8")[byte_start:byte_end].strip()
+
+    # Build overlapping 60-char search chunks — covers multi-sentence spans
+    clean = raw_snippet.replace("\n", " ")
+    step = 30
+    chunk_len = 65
+    search_chunks = []
+    for i in range(0, len(clean), step):
+        chunk = clean[i : i + chunk_len].strip()
+        if len(chunk) >= 20:
+            search_chunks.append(chunk)
+    if not search_chunks:
+        search_chunks = [clean[:80]]
+
+    stem = re.sub(r"_cleaned\.md$", "", file_path.name)
+    pdf_hits = _glob.glob(
+        str(_REPO_ROOT / "data" / "pdfs" / "raw" / "**" / stem / "paper.pdf"),
+        recursive=True,
+    )
+    if not pdf_hits:
+        raise HTTPException(status_code=404, detail="PDF not found")
+
+    try:
+        doc = fitz.open(str(pdf_hits[0]))
+        n_pages = len(doc)
+
+        # Find the page with the most hits across all chunks
+        page_hits: dict[int, list] = {}
+        for chunk in search_chunks:
+            for i, page in enumerate(doc):
+                rects = page.search_for(chunk)
+                if rects:
+                    page_hits.setdefault(i, []).extend(rects)
+
+        # Pick page with most match rectangles; default to 0
+        target_page = max(page_hits, key=lambda k: len(page_hits[k])) if page_hits else 0
+
+        # Render ALL pages — highlight only the target page
+        mat = fitz.Matrix(1.8, 1.8)
+
+        pixmaps = []
+        for pi in range(n_pages):
+            pg = doc[pi]
+            if pi == target_page and pi in page_hits:
+                seen: set = set()
+                for rect in page_hits[pi]:
+                    key = (round(rect.x0), round(rect.y0))
+                    if key not in seen:
+                        seen.add(key)
+                        annot = pg.add_highlight_annot(rect)
+                        annot.set_colors(stroke=[1.0, 0.85, 0.0])
+                        annot.update()
+            pixmaps.append(pg.get_pixmap(matrix=mat, alpha=False))
+
+        # Stack all pages → JPEG (5-8× smaller than PNG, ~300ms faster transfer)
+        from PIL import Image as _PILImage
+        import io as _io, hashlib as _hl
+
+        pil_pages = [_PILImage.frombytes("RGB", (p.width, p.height), p.samples) for p in pixmaps]
+        total_h = sum(p.height for p in pil_pages)
+        combined_img = _PILImage.new("RGB", (pil_pages[0].width, total_h), (255, 255, 255))
+        y = 0
+        for p in pil_pages:
+            combined_img.paste(p, (0, y))
+            y += p.height
+
+        buf = _io.BytesIO()
+        combined_img.save(buf, format="JPEG", quality=82, optimize=True)
+        jpg = buf.getvalue()
+        doc.close()
+
+        # write to disk cache
+        cache_key  = _hl.md5(f"{source}:{byte_start}:{byte_end}".encode()).hexdigest()
+        cache_dir  = _REPO_ROOT / "data" / "artifacts" / "highlight_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / f"{cache_key}.jpg").write_bytes(jpg)
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return _R(content=jpg, media_type="image/jpeg",
+              headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/verify", response_model=VerifyResponse)
 async def verify_chunk(source: str, byte_start: int, byte_end: int) -> VerifyResponse:
     filename = Path(source).name  # strip any path traversal
@@ -597,8 +708,9 @@ async def verify_chunk(source: str, byte_start: int, byte_end: int) -> VerifyRes
     text = file_path.read_text(encoding="utf-8")
     snippet = text[byte_start:byte_end]
 
-    # Resolve PDF url from source stem
+    # Resolve PDF and build highlight url
     pdf_url: Optional[str] = None
+    highlight_url: Optional[str] = None
     stem = re.sub(r"_cleaned\.md$", "", file_path.name)
     pdf_hits = _glob.glob(
         str(_REPO_ROOT / "data" / "pdfs" / "raw" / "**" / stem / "paper.pdf"),
@@ -608,6 +720,8 @@ async def verify_chunk(source: str, byte_start: int, byte_end: int) -> VerifyRes
         pp = Path(pdf_hits[0])
         doi_path = f"{pp.parent.parent.name}/{pp.parent.name}"
         pdf_url = f"/api/pdf/{doi_path}"
+        qs = f"source={source}&byte_start={byte_start}&byte_end={byte_end}"
+        highlight_url = f"/api/verify/highlight?{qs}"
 
     return VerifyResponse(
         source=file_path.name,
@@ -615,6 +729,7 @@ async def verify_chunk(source: str, byte_start: int, byte_end: int) -> VerifyRes
         byte_end=byte_end,
         snippet=snippet,
         pdf_url=pdf_url,
+        highlight_url=highlight_url,
     )
 
 

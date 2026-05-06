@@ -78,7 +78,8 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	ingestion-qdrant-down ingestion-qdrant-logs ingestion-qdrant-clear ingestion-qdrant-delete \
 	ingestion-neo4j-build ingestion-neo4j-delete ingestion-neo4j-stats \
 	ingestion-list-documents ingestion-list-executions ingestion-compare-runs \
-	ingestion-clean ingestion-clean-all
+	ingestion-clean ingestion-clean-all \
+	test-suite
 
 help: ## Show all root orchestration targets
 	@printf "\n$(BOLD)Healthcare Platform — Unified Control Surface$(NC)\n\n"
@@ -365,6 +366,9 @@ reasoning-clean: ## Remove reasoning caches and logs
 
 reasoning-test: ## Run reasoning pytest suite
 	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m pytest tests/ -v
+
+test-suite: ## Run root-level cross-module test suite (tests/)
+	@$(CURDIR)/$(REASONING_DIR)/$(REASONING_PYTHON) -m pytest tests/ -v
 
 reasoning-run: ## Run the reasoning CLI interactively (AGENT=<name>)
 	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src.cli --agent "$(AGENT)"
