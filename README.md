@@ -137,6 +137,8 @@ Infrastructure is heavy (multiple Docker services) → consider lightweight alte
 
 It is big and slow
 
+Might be overkill for simple use cases → modular design allows swapping components, currently focusing on simplification and product reliability. Collaboration welcome
+
 ## License
 
 MIT – use it, break it, improve it.
