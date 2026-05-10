@@ -8,7 +8,7 @@ import logging
 import re
 from typing import Any, Dict, List
 
-from ..base import BaseTool
+from .base import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +179,8 @@ class GraphRAGTool(BaseTool):
         graph_facts = self._graph_context(keywords, neo4j_limit)
 
         return {
+            "found": bool(vector_results or graph_facts),
+            "source": "graphrag",
             "query": query,
             "keywords": keywords,
             "vector_results": vector_results,

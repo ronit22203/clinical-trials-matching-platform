@@ -46,11 +46,11 @@ Every call to `log_execution()` produces a JSON object with the following fields
 | temperature | float | Temperature hyperparameter. |
 | top_p | float | Top-p hyperparameter. |
 | tools_called | List[str] | Names of tools invoked during execution. |
-| tool_responses | dict (optional) | Raw string result from each tool, keyed by tool name. Present for both SimpleAgent and Temporal executions. |
+| tool_responses | dict (optional) | Raw string result from each tool, keyed by tool name. Present for tool-using executions, including concurrent fan-out runs. |
 | tool_success_rate | float | Fraction of tools that succeeded, rounded to 2 decimal places. |
 | git_commit | str (optional) | Current Git commit SHA, if available. |
 | router_confidence | float (optional) | Routing confidence score, if applicable. |
-| router_intent | str (optional) | Intent classification. `"temporal"` for standard Temporal runs; `"temporal-hitl"` for human-in-loop runs. |
+| router_intent | str (optional) | Intent classification, such as `"langgraph"` for standard ReAct runs or `"parallel"` for concurrent fan-out runs. |
 | memory_snapshot | dict (optional) | Conversation memory state, if applicable. |
 
 ### Field Truncation
@@ -122,9 +122,9 @@ Optional fields are omitted from the log entry entirely when `None`.
 
 The CLI calls `_log_execution(agent, query, response, logger)` after every `agent.run()`. This extracts all values from `agent.metrics` and forwards them to `logger.log_execution()`. The `tool_responses` field is populated by the LangChain tool wrapper in `SimpleAgent`, which captures each tool's raw return value before passing it back to the ReAct loop.
 
-### Temporal Path
+### Parallel Path
 
-The CLI's `_run_temporal()` calls `logger.log_execution()` directly using values from `AgentConfig` and the returned workflow result dict. `router_intent` is set to `"temporal"` for standard runs and `"temporal-hitl"` for human-in-loop runs. The `tool_responses` field is populated from the workflow's `tool_results` dict, which contains raw API responses from each parallel tool activity.
+When the CLI uses concurrent tool fan-out, it still calls `logger.log_execution()` through the standard agent metrics path. `router_intent` can be set to `"parallel"` to distinguish these executions, and `tool_responses` contains the raw outputs gathered from the concurrent `asyncio.gather` call.
 
 ## Log Analysis Examples
 
@@ -146,16 +146,16 @@ All executions for a specific Git commit:
 grep '"git_commit": "abc123"' log/summary.jsonl | jq '.user_query'
 ```
 
-All Temporal workflow executions:
+All parallel fan-out executions:
 
 ```bash
-cat log/summary.jsonl | jq 'select(.router_intent | startswith("temporal"))'
+cat log/summary.jsonl | jq 'select(.router_intent == "parallel")'
 ```
 
-All human-in-loop executions:
+All LangGraph ReAct executions:
 
 ```bash
-cat log/summary.jsonl | jq 'select(.router_intent == "temporal-hitl")'
+cat log/summary.jsonl | jq 'select(.router_intent == "langgraph")'
 ```
 
 Raw tool responses for a specific query:

@@ -1,201 +1,175 @@
-# src/agent.py
-import asyncio
+"""
+Two-phase clinical research agent.
+
+Phase 1 — Mandatory tool execution (no LLM routing decision):
+    GraphRAG is called directly and always runs before the LLM sees the query.
+
+Phase 2 — Evidence-grounded synthesis:
+    The LLM receives only the retrieved evidence + query. A strict system prompt
+    prevents parametric memory use. If GraphRAG returns found=false, the LLM
+    responds with a fixed "no evidence" message — no speculation.
+"""
+from __future__ import annotations
+
+import json
+import logging
 import time
-from typing import Iterator
-from langchain_core.messages import AIMessageChunk, HumanMessage, SystemMessage
-from langchain_core.tools import tool as lc_tool
-from langgraph.prebuilt import create_react_agent
-from .config_loader import AgentConfig
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Iterator
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from .config import AgentConfig, load_config
 from .llm_factory import build_llm
+from .tools.graphrag import GraphRAGTool
+
+logger = logging.getLogger(__name__)
+
+_NO_EVIDENCE_RESPONSE = "No evidence found for this query."
 
 
-class ExecutionMetrics:
-    """Captures execution metrics for logging."""
-    def __init__(self, config: AgentConfig):
-        self.model = config.model
-        self.temperature = config.model_params.temperature
-        self.top_p = config.model_params.top_p
-        self.system_instruction = config.system_prompt or ""
-        self.tools_called = []
-        self.tool_responses: dict = {}
-        self.start_time = None
-        self.end_time = None
-        self.tokens_input = 0
-        self.tokens_output = 0
-        self.response = ""
+@dataclass
+class RunResult:
+    query: str
+    evidence: dict[str, Any]
+    synthesis: str
+    latency_ms: float
+    found: bool = field(init=False)
 
-    @property
-    def latency_ms(self) -> float:
-        if self.start_time and self.end_time:
-            return (self.end_time - self.start_time) * 1000
-        return 0.0
+    def __post_init__(self) -> None:
+        self.found = bool(self.evidence.get("found", False))
 
 
-class SimpleAgent:
-    def __init__(self, config: AgentConfig, tool_registry=None):
+def _format_evidence(evidence: dict[str, Any]) -> str:
+    """Render GraphRAG output as a readable evidence block for the LLM."""
+    if not evidence.get("found", False):
+        return "No evidence retrieved."
+
+    parts: list[str] = []
+
+    vector_results: list[dict] = evidence.get("vector_results", [])
+    for i, hit in enumerate(vector_results, 1):
+        source = hit.get("source", "unknown")
+        score = hit.get("reranker_score") or hit.get("score", 0)
+        content = hit.get("content", "").strip()
+        parts.append(f"[{i}] source={source} score={score:.4f}\n{content}")
+
+    graph_facts: list[str] = evidence.get("graph_facts", [])
+    if graph_facts:
+        parts.append("\nKnowledge graph facts:")
+        parts.extend(f"  • {fact}" for fact in graph_facts)
+
+    return "\n\n".join(parts) if parts else "No evidence retrieved."
+
+
+class Agent:
+    """Deterministic two-phase pipeline: GraphRAG retrieval → grounded synthesis."""
+
+    def __init__(self, config: AgentConfig) -> None:
         self.config = config
-        params = config.model_params.model_dump()
+        params = config.model_params.model_dump(exclude_none=True)
         self.llm = build_llm(config.model, **params)
-        self.tool_registry = tool_registry
-        self.metrics = None
+        self.graphrag = GraphRAGTool(config.graphrag.model_dump())
 
-        self._agent = None
-        if tool_registry and config.tools:
-            lc_tools = self._build_langchain_tools(config, tool_registry)
-            if lc_tools:
-                prompt = config.system_prompt or "You are a helpful clinical research assistant."
-                self._agent = create_react_agent(self.llm, lc_tools, prompt=prompt)
+    @classmethod
+    def from_config(cls, path: Path | None = None) -> "Agent":
+        """Construct an Agent from the app.yaml agentic_reasoning section."""
+        return cls(load_config(path))
 
-    def _build_langchain_tools(self, config, tool_registry):
-        tools = []
-        for tool_cfg in config.tools:
-            instance = tool_registry.get_tool(tool_cfg.name)
-            if instance:
-                description = instance.description
-                name = tool_cfg.name
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
-                @lc_tool(name, description=description)
-                def _tool(input: str, _fn=instance.cached_execute, _name=name) -> str:
-                    result = str(_fn(input))
-                    if self.metrics:
-                        if _name not in self.metrics.tools_called:
-                            self.metrics.tools_called.append(_name)
-                        self.metrics.tool_responses[_name] = result
-                    return result
+    def _build_messages(self, query: str, evidence: dict[str, Any]) -> list:
+        context = _format_evidence(evidence)
+        user_content = (
+            f"[QUERY]\n{query}\n\n"
+            f"[EVIDENCE]\n{context}\n[/EVIDENCE]"
+        )
+        return [
+            SystemMessage(content=self.config.system_prompt),
+            HumanMessage(content=user_content),
+        ]
 
-                tools.append(_tool)
-        return tools
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-    def run(self, query: str) -> str:
-        self.metrics = ExecutionMetrics(self.config)
-        self.metrics.start_time = time.time()
+    def run(self, query: str) -> RunResult:
+        """Blocking two-phase run. Returns a RunResult with synthesis and evidence."""
+        t0 = time.perf_counter()
 
-        try:
-            if self._agent:
-                result = self._agent.invoke({"messages": [HumanMessage(content=query)]})
-                response = result["messages"][-1].content
-            else:
-                messages = []
-                if self.config.system_prompt:
-                    messages.append(SystemMessage(content=self.config.system_prompt))
-                messages.append(HumanMessage(content=query))
-                response = self.llm.invoke(messages).content
+        # Phase 1: deterministic tool execution
+        logger.info("Phase 1 — GraphRAG retrieval for query: %s", query)
+        evidence = self.graphrag.cached_execute(query)
+        if not isinstance(evidence, dict):
+            evidence = {"found": False, "error": str(evidence)}
+        logger.info(
+            "Phase 1 complete — found=%s, vector_hits=%d, graph_facts=%d",
+            evidence.get("found"),
+            len(evidence.get("vector_results", [])),
+            len(evidence.get("graph_facts", [])),
+        )
 
-            self.metrics.response = response
+        # Phase 2: grounded synthesis
+        if not evidence.get("found", False):
+            synthesis = _NO_EVIDENCE_RESPONSE
+        else:
+            logger.info("Phase 2 — LLM synthesis from evidence")
+            messages = self._build_messages(query, evidence)
+            response = self.llm.invoke(messages)
+            synthesis = response.content
 
-            try:
-                self.metrics.tokens_input = self.llm.get_num_tokens(query)
-                self.metrics.tokens_output = self.llm.get_num_tokens(response)
-            except Exception:
-                pass
+        latency_ms = (time.perf_counter() - t0) * 1000
+        logger.info("Run complete in %.0fms", latency_ms)
 
-            return response
-        finally:
-            self.metrics.end_time = time.time()
+        return RunResult(
+            query=query,
+            evidence=evidence,
+            synthesis=synthesis,
+            latency_ms=latency_ms,
+        )
 
     def stream(self, query: str) -> Iterator[str]:
-        """Yield response tokens as they are generated.
+        """Two-phase streaming run. Phase 1 blocks; Phase 2 streams synthesis tokens.
 
-        For the no-tool path, streams directly from the LLM.
-        For the ReAct path, streams events and yields only AI content chunks.
-        Populates self.metrics on completion.
+        Yields string chunks as they arrive. Callers can accumulate them to reconstruct
+        the full synthesis. Evidence is retrievable via agent.last_evidence after the
+        generator is exhausted.
         """
-        self.metrics = ExecutionMetrics(self.config)
-        self.metrics.start_time = time.time()
-        response_parts: list[str] = []
+        # Phase 1: blocking (must complete before LLM sees anything)
+        logger.info("Phase 1 — GraphRAG retrieval (stream mode)")
+        evidence = self.graphrag.cached_execute(query)
+        if not isinstance(evidence, dict):
+            evidence = {"found": False, "error": str(evidence)}
+        self.last_evidence = evidence
 
-        try:
-            if self._agent:
-                for event in self._agent.stream(
-                    {"messages": [HumanMessage(content=query)]},
-                    stream_mode="messages",
-                ):
-                    # stream_mode="messages" yields (message_chunk, metadata) tuples.
-                    # Only yield content from AI response chunks — ToolMessages and
-                    # HumanMessages must be suppressed so raw JSON tool payloads don't
-                    # appear in the terminal output.
-                    chunk, meta = event if isinstance(event, tuple) else (event, {})
-                    if not isinstance(chunk, AIMessageChunk):
-                        # Still track tool calls from ToolMessage metadata
-                        if self.metrics and meta.get("langgraph_node") == "tools":
-                            tool_name = getattr(chunk, "name", None)
-                            if tool_name and tool_name not in self.metrics.tools_called:
-                                self.metrics.tools_called.append(tool_name)
-                        continue
-                    token = chunk.content or ""
-                    if token:
-                        response_parts.append(token)
-                        yield token
-            else:
-                messages = []
-                if self.config.system_prompt:
-                    messages.append(SystemMessage(content=self.config.system_prompt))
-                messages.append(HumanMessage(content=query))
-                for chunk in self.llm.stream(messages):
-                    token = chunk.content or ""
-                    if token:
-                        response_parts.append(token)
-                        yield token
-        finally:
-            self.metrics.end_time = time.time()
-            self.metrics.response = "".join(response_parts)
-            try:
-                self.metrics.tokens_input = self.llm.get_num_tokens(query)
-                self.metrics.tokens_output = self.llm.get_num_tokens(self.metrics.response)
-            except Exception:
-                pass
-
-    async def run_parallel(self, query: str) -> str:
-        """Fan out all configured tool calls concurrently, then synthesize with the LLM.
-
-        Bypasses the LangGraph ReAct loop — all tools run at once via asyncio.gather
-        (each sync execute() is offloaded to a thread). Suitable when every configured
-        tool is relevant to the query, mirroring ClinicalResearchWorkflow without Temporal.
-        Falls back to run() if no tools are configured.
-
-        Must be awaited — use ``await agent.run_parallel(query)`` from async callers
-        (e.g. FastAPI endpoints). Calling asyncio.run() here would conflict with the
-        event loop already running inside uvicorn/FastAPI.
-        """
-        if not self.tool_registry or not self.config.tools:
-            return self.run(query)
-
-        self.metrics = ExecutionMetrics(self.config)
-        self.metrics.start_time = time.time()
-
-        async def _call(name: str, instance) -> tuple[str, str]:
-            result = await asyncio.to_thread(instance.cached_execute, query)
-            return name, str(result)
-
-        tasks = [
-            _call(tc.name, self.tool_registry.get_tool(tc.name))
-            for tc in self.config.tools
-            if self.tool_registry.get_tool(tc.name)
-        ]
-        tool_results = dict(await asyncio.gather(*tasks))
-        self.metrics.tools_called = list(tool_results.keys())
-        self.metrics.tool_responses = tool_results
-
-        context = "\n\n".join(
-            f"[{name}]\n{result}" for name, result in tool_results.items()
+        logger.info(
+            "Phase 1 complete — found=%s, vector_hits=%d",
+            evidence.get("found"),
+            len(evidence.get("vector_results", [])),
         )
-        system = self.config.system_prompt or "You are a helpful clinical research assistant."
-        synthesis_prompt = (
-            f"{system}\n\nUse the following tool results to answer the user's query.\n\n"
-            f"{context}"
-        )
-        messages = [
-            SystemMessage(content=synthesis_prompt),
-            HumanMessage(content=query),
-        ]
-        try:
-            response = self.llm.invoke(messages).content
-            self.metrics.response = response
-            try:
-                self.metrics.tokens_input = self.llm.get_num_tokens(query)
-                self.metrics.tokens_output = self.llm.get_num_tokens(response)
-            except Exception:
-                pass
-            return response
-        finally:
-            self.metrics.end_time = time.time()
+
+        if not evidence.get("found", False):
+            yield _NO_EVIDENCE_RESPONSE
+            return
+
+        # Phase 2: stream synthesis tokens
+        logger.info("Phase 2 — streaming synthesis")
+        messages = self._build_messages(query, evidence)
+        for chunk in self.llm.stream(messages):
+            token = chunk.content or ""
+            if token:
+                yield token
+
+    def run_json(self, query: str) -> dict[str, Any]:
+        """Run and return a JSON-serialisable dict (for server/CLI use)."""
+        result = self.run(query)
+        return {
+            "query": result.query,
+            "synthesis": result.synthesis,
+            "found": result.found,
+            "latency_ms": round(result.latency_ms, 1),
+            "evidence": result.evidence,
+        }

@@ -130,6 +130,6 @@ The config loader is designed for additive expansion:
 
 **Knowledge base configs.** A `knowledge:` block in AgentConfig would reference RAG sources such as Qdrant collections or document corpora.
 
-**Workflow configs.** A `workflow:` block would select which Temporal workflow class to use, allowing different orchestration strategies per agent.
+**Execution configs.** A `runtime:` block could select between ReAct tool selection and parallel prefetch strategies, allowing different orchestration styles per agent.
 
 **Environment variable substitution.** YAML values could reference environment variables using `${VAR_NAME}` syntax, pre-processed before Pydantic validation.

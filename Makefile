@@ -27,7 +27,7 @@ QUERY ?= What is the latest evidence for adjuvant immunotherapy in melanoma?
 SEARCH_QUERY ?= cancer immunotherapy
 RECORD_ID ?=
 PDF_TYPE ?= paper
-AGENT ?= local_assistant
+AGENT ?= assistant
 SGLANG_AGENT ?= sglang_assistant
 SKIP ?=
 DOC ?=
@@ -59,17 +59,13 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 .PHONY: help \
 	bootstrap validate up down serve serve-api serve-ui fetch ingest \
 	status benchmark-sepsis \
-	benchmark-all benchmark-retrieval benchmark-extraction benchmark-inference benchmark-report \
+	benchmark-all benchmark-retrieval benchmark-extraction benchmark-inference benchmark-reasoning benchmark-report \
 	deterministic-run _det-ingest-timed _det-graph-timed _det-finalize \
 	clean clean-all clean-artifacts clean-ocr clean-md clean-chunks clean-vectors clean-graph clean-hard \
 	ui-install ui-dev ui-build ui-start \
 	reasoning-install reasoning-clean reasoning-test reasoning-run reasoning-run-query \
-	reasoning-run-temporal reasoning-run-temporal-hitl reasoning-temporal-up reasoning-temporal-down \
-	reasoning-temporal-worker reasoning-temporal-run reasoning-temporal-run-hitl \
-	reasoning-graphrag-up reasoning-graphrag-down reasoning-services-up reasoning-services-down \
+	reasoning-graphrag-up reasoning-graphrag-down \
 	reasoning-download-models reasoning-sglang-run reasoning-sglang-run-query \
-	reasoning-sglang-run-temporal reasoning-sglang-run-temporal-hitl \
-	reasoning-temporal-run-sglang reasoning-temporal-run-hitl-sglang reasoning-serve-api \
 	simple-ui-serve \
 	acquisition-install acquisition-test acquisition-fetch acquisition-source-validate \
 	acquisition-source-search acquisition-source-fetch \
@@ -89,7 +85,7 @@ help: ## Show all root orchestration targets
 
 status: ## Show running containers and data artifact counts
 	@printf "$(BOLD)--- Infrastructure ---$(NC)\n"
-	@docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep -E "qdrant|neo4j|temporal|postgres" || printf "  $(YELLOW)No platform containers running$(NC)\n"
+	@docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep -E "qdrant|neo4j" || printf "  $(YELLOW)No platform containers running$(NC)\n"
 	@printf "\n$(BOLD)--- Storage Artifacts ---$(NC)\n"
 	@printf "  PDFs:   %s\n" "$$(find data/pdfs -type f -name '*.pdf' 2>/dev/null | wc -l | xargs)"
 	@printf "  OCR:    %s\n" "$$(find data/artifacts/extract -type f 2>/dev/null | wc -l | xargs)"
@@ -184,6 +180,7 @@ benchmark-all: ## Run the full evaluation harness and generate report (RUN_DIR a
 	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-retrieval RUN_DIR="$(RUN_DIR)"
 	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-extraction RUN_DIR="$(RUN_DIR)"
 	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-inference RUN_DIR="$(RUN_DIR)"
+	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-reasoning RUN_DIR="$(RUN_DIR)"
 	@$(MAKE) --no-print-directory benchmark-report RUN_DIR="$(RUN_DIR)"
 	@printf "$(GREEN)$(BOLD)Full benchmark complete → $(RUN_DIR)/report.md$(NC)\n"
 
@@ -221,6 +218,15 @@ benchmark-inference: ## Run inference timing evaluation (TTFT, TPOT, throughput)
 		--runs "$(BENCH_RUNS)" \
 		--output "../$(RUN_DIR)/inference.json"
 
+benchmark-reasoning: ## Run agent reasoning evaluation (two-phase pipeline, 20 golden queries)
+	@printf "$(CYAN)Running reasoning evaluator …$(NC)\n"
+	@mkdir -p "$(RUN_DIR)"
+	@cd $(BENCHMARKING_DIR) && BENCH_RUN_ID="$${BENCH_RUN_ID:-bench_$(RUN_DATE)_$(RUN_HASH)}" \
+		$(BENCH_PYTHON) evaluators/reasoning_evaluator.py \
+		--queries golden/queries.json \
+		--output "../$(RUN_DIR)/reasoning.json" \
+		--config "../config/app.yaml"
+
 benchmark-report: ## Generate Markdown report from a completed run dir (RUN_DIR=...)
 	@test -n "$(RUN_DIR)" || { printf "$(RED)FAIL: RUN_DIR is required$(NC)\n"; exit 1; }
 	@printf "$(CYAN)Generating report → $(RUN_DIR)/report.md$(NC)\n"
@@ -242,7 +248,8 @@ benchmark-report: ## Generate Markdown report from a completed run dir (RUN_DIR=
 #     6  Retrieval  — Recall@K, Precision@K, NDCG@K, MRR, HitRate (bootstrap CIs)
 #     7  Extraction — entity/relation F1 (exact + relaxed) vs Neo4j
 #     8  Inference  — TTFT, TPOT, throughput across $(BENCH_RUNS) independent runs
-#     9  Finalize   — merge all stage JSONs → single manifest.json + report.md
+#     9  Reasoning  — two-phase agent evaluation (found rate, latency, evidence density)
+#    10  Finalize   — merge all stage JSONs → single manifest.json + report.md
 #
 #   Override the golden PDF:  make deterministic-run BENCH_PDF=data/pdfs/my.pdf
 #   Override inference runs:  make deterministic-run BENCH_RUNS=5
@@ -253,27 +260,30 @@ deterministic-run: ## ★ Full deterministic pipeline → single manifest.json (
 	@printf "$(BOLD)$(BLUE)  PDF: $(BENCH_PDF)$(NC)\n"
 	@printf "$(BOLD)$(BLUE)═══════════════════════════════════════════════════════════$(NC)\n\n"
 	@mkdir -p "$(DET_RUN_DIR)"
-	@printf "$(CYAN) 1/9$(NC) Preflight: validating services …\n"
+	@printf "$(CYAN) 1/10$(NC) Preflight: validating services …\n"
 	@$(MAKE) --no-print-directory validate
-	@printf "\n$(CYAN) 2/9$(NC) Reset: wiping artifacts, vectors, graph …\n"
+	@printf "\n$(CYAN) 2/10$(NC) Reset: wiping artifacts, vectors, graph …\n"
 	@$(MAKE) --no-print-directory clean-artifacts
 	@$(MAKE) --no-print-directory clean-vectors
 	@$(MAKE) --no-print-directory clean-graph
-	@printf "\n$(CYAN) 3/9$(NC) Ingest: OCR → Markdown → clean → chunk → embed …\n"
+	@printf "\n$(CYAN) 3/10$(NC) Ingest: OCR → Markdown → clean → chunk → embed …\n"
 	@$(MAKE) --no-print-directory _det-ingest-timed DET_RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 4/9$(NC) Graph: building Neo4j knowledge graph …\n"
+	@printf "\n$(CYAN) 4/10$(NC) Graph: building Neo4j knowledge graph …\n"
 	@$(MAKE) --no-print-directory _det-graph-timed DET_RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 5/9$(NC) Provenance: capturing git, config, model, data hashes …\n"
+	@printf "\n$(CYAN) 5/10$(NC) Provenance: capturing git, config, model, data hashes …\n"
 	@BENCH_RUN_ID="$(DET_RUN_ID)" \
 	 $(MAKE) --no-print-directory benchmark-provenance RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 6/9$(NC) Retrieval: Recall@K, NDCG, MRR, HitRate (bootstrap CIs) …\n"
+	@printf "\n$(CYAN) 6/10$(NC) Retrieval: Recall@K, NDCG, MRR, HitRate (bootstrap CIs) …\n"
 	@$(MAKE) --no-print-directory benchmark-retrieval RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 7/9$(NC) Extraction: entity/relation F1 vs Neo4j …\n"
+	@printf "\n$(CYAN) 7/10$(NC) Extraction: entity/relation F1 vs Neo4j …\n"
 	@$(MAKE) --no-print-directory benchmark-extraction RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 8/9$(NC) Inference: TTFT/TPOT/throughput ($(BENCH_RUNS) runs × 20 queries) …\n"
+	@printf "\n$(CYAN) 8/10$(NC) Inference: TTFT/TPOT/throughput ($(BENCH_RUNS) runs × 20 queries) …\n"
 	@BENCH_RUN_ID="$(DET_RUN_ID)" \
 	 $(MAKE) --no-print-directory benchmark-inference RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 9/9$(NC) Finalize: merging stage outputs → manifest.json + report …\n"
+	@printf "\n$(CYAN) 9/10$(NC) Reasoning: two-phase agent evaluation (20 queries) …\n"
+	@BENCH_RUN_ID="$(DET_RUN_ID)" \
+	 $(MAKE) --no-print-directory benchmark-reasoning RUN_DIR="$(DET_RUN_DIR)"
+	@printf "\n$(CYAN)10/10$(NC) Finalize: merging stage outputs → manifest.json + report …\n"
 	@$(MAKE) --no-print-directory _det-finalize DET_RUN_DIR="$(DET_RUN_DIR)"
 	@$(MAKE) --no-print-directory benchmark-report RUN_DIR="$(DET_RUN_DIR)"
 	@printf "\n$(GREEN)$(BOLD)✓ Deterministic run complete$(NC)\n"
@@ -370,75 +380,26 @@ reasoning-test: ## Run reasoning pytest suite
 test-suite: ## Run root-level cross-module test suite (tests/)
 	@$(CURDIR)/$(REASONING_DIR)/$(REASONING_PYTHON) -m pytest tests/ -v
 
-reasoning-run: ## Run the reasoning CLI interactively (AGENT=<name>)
-	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src.cli --agent "$(AGENT)"
+reasoning-run: ## Start the reasoning CLI in interactive mode
+	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src interactive
 
 reasoning-run-query: ## Run one reasoning query (QUERY=...)
-	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src.cli --agent "$(AGENT)" "$(QUERY)"
+	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src query "$(QUERY)"
 
-reasoning-run-temporal: ## Run the reasoning CLI interactively via Temporal
-	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src.cli --agent "$(AGENT)" --use-temporal
-
-reasoning-run-temporal-hitl: ## Run the reasoning CLI interactively via Temporal with HITL
-	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src.cli --agent "$(AGENT)" --use-temporal --human-in-loop
-
-reasoning-temporal-up: ## Start Temporal, Qdrant, and Neo4j for reasoning
-	@cd $(REASONING_DIR) && docker compose -p clinical_agents -f infra/docker-compose.yml up -d
-
-reasoning-temporal-down: ## Stop Temporal, Qdrant, and Neo4j for reasoning
-	@cd $(REASONING_DIR) && docker compose -p clinical_agents -f infra/docker-compose.yml down
-
-reasoning-temporal-worker: ## Run the Temporal worker
-	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src.temporal.worker
-
-reasoning-temporal-run: ## Run one Temporal-backed query (QUERY=...)
-	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src.cli --agent "$(AGENT)" --use-temporal "$(QUERY)"
-
-reasoning-temporal-run-hitl: ## Run one Temporal-backed query with HITL (QUERY=...)
-	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src.cli --agent "$(AGENT)" --use-temporal --human-in-loop "$(QUERY)"
-
-reasoning-graphrag-up: ## Start only GraphRAG backing services for reasoning
+reasoning-graphrag-up: ## Start GraphRAG backing services (Qdrant + Neo4j)
 	@cd $(REASONING_DIR) && docker compose -p clinical_agents -f infra/docker-compose.graphrag.yml up -d
 
-reasoning-graphrag-down: ## Stop GraphRAG backing services for reasoning
+reasoning-graphrag-down: ## Stop GraphRAG backing services
 	@cd $(REASONING_DIR) && docker compose -p clinical_agents -f infra/docker-compose.graphrag.yml down
 
-reasoning-services-up: ## Start all reasoning-local services
-	@$(MAKE) --no-print-directory reasoning-temporal-up
-	@$(MAKE) --no-print-directory reasoning-graphrag-up
-
-reasoning-services-down: ## Stop all reasoning-local services
-	@$(MAKE) --no-print-directory reasoning-temporal-down
-	@$(MAKE) --no-print-directory reasoning-graphrag-down
-
-reasoning-download-models: ## Download local models used by reasoning
+reasoning-download-models: ## Download local embedding/reranker models
 	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-en-v1.5', cache_folder='data/models'); print('Model cached to data/models/')"
 
-reasoning-sglang-run: ## Run the SGLang-backed assistant interactively
-	@cd $(REASONING_DIR) && SGLANG_BASE_URL=http://localhost:30000/v1 $(REASONING_PYTHON) -m src.cli --agent "$(SGLANG_AGENT)"
+reasoning-sglang-run: ## Run the reasoning CLI against SGLang (interactive)
+	@cd $(REASONING_DIR) && SGLANG_BASE_URL=http://localhost:30000/v1 $(REASONING_PYTHON) -m src interactive
 
 reasoning-sglang-run-query: ## Run one reasoning query against SGLang (QUERY=...)
-	@cd $(REASONING_DIR) && SGLANG_BASE_URL=http://localhost:30000/v1 $(REASONING_PYTHON) -m src.cli --agent "$(SGLANG_AGENT)" "$(QUERY)"
-
-reasoning-sglang-run-temporal: ## Run the SGLang-backed assistant interactively via Temporal
-	@cd $(REASONING_DIR) && SGLANG_BASE_URL=http://localhost:30000/v1 $(REASONING_PYTHON) -m src.cli --agent "$(SGLANG_AGENT)" --use-temporal
-
-reasoning-sglang-run-temporal-hitl: ## Run the SGLang-backed assistant interactively via Temporal with HITL
-	@cd $(REASONING_DIR) && SGLANG_BASE_URL=http://localhost:30000/v1 $(REASONING_PYTHON) -m src.cli --agent "$(SGLANG_AGENT)" --use-temporal --human-in-loop
-
-reasoning-temporal-run-sglang: ## Run one Temporal query against SGLang (QUERY=...)
-	@cd $(REASONING_DIR) && SGLANG_BASE_URL=http://localhost:30000/v1 $(REASONING_PYTHON) -m src.cli --agent "$(SGLANG_AGENT)" --use-temporal "$(QUERY)"
-
-reasoning-temporal-run-hitl-sglang: ## Run one Temporal HITL query against SGLang (QUERY=...)
-	@cd $(REASONING_DIR) && SGLANG_BASE_URL=http://localhost:30000/v1 $(REASONING_PYTHON) -m src.cli --agent "$(SGLANG_AGENT)" --use-temporal --human-in-loop "$(QUERY)"
-
-reasoning-serve-api: ## Start the FastAPI backend
-	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --host 0.0.0.0 --port 8000 --reload
-
-simple-ui-serve: ## Serve simple-ui on http://localhost:5500 (run reasoning-serve-api in another terminal first)
-	@echo "→  UI:  http://localhost:5500"
-	@echo "→  API: http://localhost:8000  (start with: make reasoning-serve-api)"
-	@cd simple-ui && python3 -m http.server 5500
+	@cd $(REASONING_DIR) && SGLANG_BASE_URL=http://localhost:30000/v1 $(REASONING_PYTHON) -m src query "$(QUERY)"
 
 acquisition-install: ## Create acquisition venv if needed and install editable package
 	@cd $(ACQUISITION_DIR) && \

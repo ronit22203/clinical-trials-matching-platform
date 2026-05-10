@@ -2,7 +2,7 @@
 
 ## Overview
 
-The command-line interface is the primary entry point for interacting with the Clinical Agents platform. Built with Click and Rich, it ties together configuration loading, agent execution, tool registry initialisation, workflow routing, and structured logging into a single command. The CLI supports one-off query execution, an interactive conversation loop, and durable Temporal workflow execution.
+The command-line interface is the primary entry point for interacting with the Clinical Agents platform. Built with Click and Rich, it ties together configuration loading, agent execution, tool registry initialisation, concurrent tool execution, and structured logging into a single command. The CLI supports one-off query execution, an interactive conversation loop, and optional parallel tool fan-out.
 
 ## Source Location
 
@@ -27,16 +27,14 @@ The `make run` target calls `.venv/bin/python -m src.cli --agent config/agentic-
 | `--agent`, `-a` | `config/agentic-reasoning/agents/assistant.yaml` | Path to the agent YAML configuration file. |
 | `--tools-dir` | `config/agentic-reasoning/tools` | Directory containing tool YAML files. |
 | `--log-dir` | `log` | Directory for JSON execution logs. |
-| `--use-temporal` | False (flag) | Route queries through a Temporal workflow instead of SimpleAgent. Supports both one-off and interactive modes. |
-| `--human-in-loop` | False (flag) | When combined with `--use-temporal`, pauses the workflow after tool results are collected and waits for explicit operator approval before synthesis. |
-| `--parallel` | False (flag) | Fan out all configured tool calls concurrently before LLM synthesis, bypassing the ReAct loop. Uses `SimpleAgent.run_parallel()`. Cannot be combined with `--use-temporal`. |
+| `--parallel` | False (flag) | Fan out all configured tool calls concurrently before LLM synthesis, bypassing the ReAct loop. Uses `SimpleAgent.run_parallel()`. |
 | `QUERY` | (optional) | The user query. Omitting it enters interactive mode. |
 
 ## Execution Modes
 
 ### One-Off Query
 
-When `QUERY` is provided and `--use-temporal` is not set:
+When `QUERY` is provided:
 
 ```bash
 python -m src.cli "What are the clinical indications for metformin?"
@@ -50,7 +48,7 @@ python -m src.cli --parallel "What are the clinical indications for metformin?"
 
 ### Interactive Mode
 
-When no `QUERY` is provided and `--use-temporal` is not set, the CLI enters a loop:
+When no `QUERY` is provided, the CLI enters a loop:
 
 ```bash
 python -m src.cli
@@ -68,40 +66,6 @@ python -m src.cli --parallel
 
 In parallel mode the CLI displays a spinner while tool calls run concurrently, then renders the synthesised response as Markdown.
 
-### Temporal Workflow Mode
-
-When `--use-temporal` is passed, the CLI bypasses `SimpleAgent` entirely and routes each query through a `ClinicalResearchWorkflow`. Both one-off and interactive modes are supported.
-
-**One-off query:**
-
-```bash
-python -m src.cli --use-temporal "Side effects of semaglutide?"
-```
-
-**Interactive mode (Temporal, auto-synthesise):**
-
-```bash
-python -m src.cli --use-temporal
-```
-
-Entering interactive mode with `--use-temporal` starts a new Temporal workflow per query. The prompt behaves identically to the standard interactive loop. Typing `exit` or `quit` terminates the session.
-
-**Interactive mode with human-in-loop review:**
-
-```bash
-python -m src.cli --use-temporal --human-in-loop
-```
-
-After tool results are collected, the CLI displays each tool's raw result in the terminal. The operator is then prompted:
-
-```
-Approve synthesis? (y/n):
-```
-
-Entering `y` sends an `approve` signal to the running workflow, which then proceeds to LLM synthesis. Entering `n` leaves the workflow at the approval gate until it times out (10 minutes), and the next query can be entered immediately.
-
-The CLI calls `run_research_sync()` (standard mode) or `run_hitl_sync()` (HITL mode) from `src/temporal/client.py`. If the Temporal server or worker is unreachable, the exception is caught and displayed with an actionable message: `Is the Temporal worker running? Run: make temporal-worker`.
-
 ## Initialisation Sequence
 
 **Step 1.** Resolve the agent config path. If the file does not exist, print a red error and return.
@@ -112,13 +76,11 @@ The CLI calls `run_research_sync()` (standard mode) or `run_hitl_sync()` (HITL m
 
 **Step 4.** Create `ExecutionLogger(log_dir)`. The logger creates the directory if it does not exist.
 
-**Step 5.** If `--use-temporal` is set, call `_run_temporal()` and return.
+**Step 5.** Attempt to create a `ToolRegistry`. If `tools_dir` does not exist, `tool_registry` is set to `None` and the agent runs in direct LLM mode without printing an error.
 
-**Step 6.** Attempt to create a `ToolRegistry`. If `tools_dir` does not exist, `tool_registry` is set to `None` and the agent runs in direct LLM mode without printing an error.
+**Step 6.** Create `SimpleAgent(config, tool_registry)`.
 
-**Step 7.** Create `SimpleAgent(config, tool_registry)`.
-
-**Step 8.** Enter either the single-query or interactive execution path.
+**Step 7.** Enter either the single-query or interactive execution path.
 
 ## Response Display
 
@@ -161,7 +123,7 @@ logger.log_execution(
 
 `tool_responses` is a dict mapping each tool name to its raw string result, captured inside the `SimpleAgent` LangChain wrapper before the result is passed back to the ReAct agent.
 
-For Temporal executions, `_run_temporal` calls `logger.log_execution` directly using `config` fields and the workflow result dict. `router_intent` is set to `"temporal"` for standard Temporal runs and `"temporal-hitl"` for human-in-loop runs, allowing these entries to be distinguished in log analysis. The `tool_responses` field is populated from the workflow's `tool_results` dict.
+For concurrent fan-out executions, the CLI still logs through the standard agent metrics path. `router_intent` can be set to `"parallel"` to distinguish these runs in log analysis, and `tool_responses` is populated from the gathered tool outputs.
 
 ## Error Handling Summary
 
@@ -171,7 +133,7 @@ For Temporal executions, `_run_temporal` calls `logger.log_execution` directly u
 | Invalid agent YAML schema | Pydantic ValidationError propagates to terminal. |
 | `tools_dir` not found | `tool_registry = None`; agent runs without tools. |
 | Individual tool YAML invalid | ToolRegistry logs error; other tools continue loading. |
-| Temporal server unreachable | Exception caught; actionable message displayed. |
+| Parallel tool execution error | Exception propagates with the underlying tool or synthesis failure context. |
 | LLM invocation error | Propagates to terminal (not caught at CLI level). |
 
 ## Makefile Targets
@@ -181,13 +143,6 @@ All targets use `PYTHON := .venv/bin/python` so they work correctly whether or n
 | Target | Command |
 |---|---|
 | `make run` | Interactive mode, local ReAct agent. |
-| `make run-temporal` | Interactive mode, Temporal workflow per query. |
-| `make run-temporal-hitl` | Interactive mode, Temporal workflow with HITL approval gate. |
-| `make temporal-worker` | Start the Temporal activity and workflow worker. |
-| `make temporal-up` | Start Temporal infrastructure via Docker Compose. |
-| `make temporal-down` | Stop Temporal infrastructure. |
-| `make temporal-run QUERY="..."` | One-off query via Temporal (no HITL). |
-| `make temporal-run-hitl QUERY="..."` | One-off query via Temporal with HITL approval gate. |
 | `make install` | Install the project in editable mode via `.venv/bin/python -m pip install -e .`. |
 | `make test` | Run the test suite via `.venv/bin/python -m pytest tests/ -v`. |
 | `make clean` | Remove all `__pycache__` directories and `.pyc` files outside `.venv`. |

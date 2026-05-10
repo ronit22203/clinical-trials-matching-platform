@@ -24,9 +24,9 @@ class TestTopLevelSchema:
         missing = self.REQUIRED_KEYS - set(_cfg.keys())
         assert not missing, f"config/app.yaml missing top-level keys: {missing}"
 
-    def test_services_has_neo4j_qdrant_temporal(self):
+    def test_services_has_neo4j_qdrant(self):
         svcs = _cfg["services"]
-        for svc in ("neo4j", "qdrant", "temporal"):
+        for svc in ("neo4j", "qdrant"):
             assert svc in svcs, f"services section missing: {svc!r}"
 
     def test_services_neo4j_has_uri(self):

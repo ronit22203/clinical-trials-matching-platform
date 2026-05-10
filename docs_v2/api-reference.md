@@ -28,7 +28,7 @@ Content-Type: application/json
 {
   "query": "string",
   "tools": ["string"],
-  "mode": "langgraph | temporal",
+  "mode": "langgraph",
   "agent_config": "string"
 }
 ```
@@ -37,7 +37,7 @@ Content-Type: application/json
 |-------|------|----------|---------|-------------|
 | `query` | `string` | Yes | — | Natural language query. 1–4096 characters. |
 | `tools` | `string[]` | No | Agent config defaults | Override the tool list for this request. An empty array uses the agent's configured defaults. |
-| `mode` | `"langgraph" \| "temporal"` | No | `"langgraph"` | Execution runtime. `langgraph` is lower-latency; `temporal` is durable and auditable. |
+| `mode` | `"langgraph"` | No | `"langgraph"` | Execution runtime. LangGraph ReAct orchestrates tool use and synthesis. |
 | `agent_config` | `string` | No | `"local_assistant"` | Named agent configuration key from `config/app.yaml`. |
 
 #### Response `200 OK`
@@ -53,11 +53,11 @@ Content-Type: application/json
     "tokensInput": 0,
     "tokensOutput": 0,
     "gitCommit": "string",
-    "routerIntent": "langgraph | temporal",
+    "routerIntent": "langgraph",
     "entries": [
       {
         "id": "string",
-        "step": "query_submitted | tool_called | data_retrieved | hitl_pending | final_decision",
+        "step": "query_submitted | tool_called | data_retrieved | final_decision",
         "label": "string",
         "timestamp": "ISO 8601",
         "durationMs": 0,
@@ -161,12 +161,12 @@ curl -s -X POST http://localhost:8000/api/query \
   -H "Content-Type: application/json" \
   -d '{"query": "What is AUROC?"}' | jq .synthesis
 
-# Query with specific tools and Temporal runtime
+# Query with specific tools
 curl -s -X POST http://localhost:8000/api/query \
   -H "Content-Type: application/json" \
   -d '{
     "query": "List sepsis biomarkers from the ingested documents",
-    "mode": "temporal",
+    "mode": "langgraph",
     "tools": ["graphrag"]
   }' | jq '{id: .executionLog.executionId, tools: .executionLog.toolsCalled}'
 

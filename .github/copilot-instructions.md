@@ -6,7 +6,7 @@ Monorepo for a clinical research AI platform. Four independent modules, each wit
 
 | Module | Purpose | Runtime |
 |---|---|---|
-| `agentic-reasoning/` | LangGraph ReAct + Temporal durable workflow engine for clinical queries | Python 3.12+ |
+| `agentic-reasoning/` | LangGraph ReAct orchestration for clinical queries | Python 3.12+ |
 | `data-acquisition/` | Multi-source PDF fetcher (ClinicalTrials.gov, PubMed, bioRxiv, medRxiv) with multi-cloud storage | Python 3.12+ |
 | `data-ingestion/` | 5-stage document pipeline: PDF → OCR → Markdown → Clean → Chunk → Embed (Qdrant + Neo4j) | Python 3.11.14 |
 | `platform-ui/` | Next.js 16 App Router frontend; currently wired to static mock data only | Node / TypeScript |
@@ -27,11 +27,7 @@ make reasoning-install              # create venv if needed + pip install -e .
 
 # Run
 make reasoning-run                            # interactive CLI
-make reasoning-run-query QUERY="..."          # single-shot, no Temporal
-make reasoning-temporal-up                    # start Temporal infrastructure
-make reasoning-temporal-worker                # start activity worker
-make reasoning-temporal-run QUERY="..."       # durable workflow query
-make reasoning-temporal-run-hitl QUERY="..."  # with human-in-the-loop gate
+make reasoning-run-query QUERY="..."          # single-shot query
 
 # Test
 make reasoning-test                 # pytest tests/ -v
@@ -93,12 +89,9 @@ All behaviour is defined in YAML — no hardcoded values in source code. Python 
 
 Pydantic v2 validates all YAML at load time; misconfigured files produce field-level errors before any execution begins.
 
-### Dual Runtime (agentic-reasoning)
+### Execution Model (agentic-reasoning)
 
-The same agent YAML drives two execution paths switchable via CLI flags:
-
-- **LangGraph ReAct** (`--agent`): synchronous, LLM autonomously selects tools via `create_react_agent`. Suitable for low-latency interactive use.
-- **Temporal Workflow** (`--use-temporal`): durable, parallel tool execution, full audit trail, optional HITL gate. All tool activities run concurrently via `asyncio.gather` inside `ClinicalResearchWorkflow.run()`.
+The same agent YAML drives LangGraph ReAct orchestration, and concurrent tool fan-out uses `asyncio.gather` / `run_parallel()` when the agent needs to prefetch multiple tool results.
 
 ### Tool Plugin System (agentic-reasoning)
 
@@ -109,13 +102,6 @@ Adding a new tool requires exactly two files:
 `ToolRegistry` loads tool definitions from `config/app.yaml` at startup. A tool that fails to load does not prevent others from loading (fault isolated).
 
 `BaseTool` provides a `TTLCache` via `cached_execute()` — prefer this over `execute()` for repeated identical queries.
-
-### Temporal Workflow Constraints
-
-`agentic-reasoning/src/temporal/workflows.py` **must remain deterministic**. Rules:
-- No I/O, logging, `random`, `time`, or non-deterministic calls inside `@workflow.run` or `@workflow.signal`/`@workflow.query` methods
-- All side effects go in `activities.py` (`@activity.defn`)
-- Use `workflow.unsafe.imports_passed_through()` for any non-deterministic import needed inside the workflow file
 
 ### Multi-Cloud Fallback (data-acquisition)
 

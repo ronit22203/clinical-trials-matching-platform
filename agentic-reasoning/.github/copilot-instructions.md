@@ -12,13 +12,6 @@
 - **Run a single test**: `pytest tests/test_agent.py::TestSimpleAgentNoTools::test_run_returns_llm_content -v`
 - **Note**: The `clinical-agents` script entry point has module resolution issues; always use `python -m src.cli`
 
-### Temporal Workflow Mode
-- **Start infrastructure**: `make reasoning-temporal-up` (Docker; UI at http://localhost:8080)
-- **Start worker** (separate terminal): `make reasoning-temporal-worker`
-- **Run with Temporal**: `make reasoning-temporal-run QUERY="your query"`
-- **Human-in-the-loop**: `make reasoning-temporal-run-hitl QUERY="your query"` (pauses for approval signal after tool calls)
-- **Stop infrastructure**: `make reasoning-temporal-down`
-
 ## Architecture Overview
 
 ### Config-Driven Design
@@ -43,18 +36,12 @@ The core engine loads configs and initializes components—changes to agent beha
    - Tracks execution metrics (latency, tokens, tools called) — always logged to `log/`
 
 4. **CLI** (`src/cli.py`)
-   - Click-based interface with `--use-temporal` and `--human-in-loop` flags
+   - Click-based interface
    - Uses Rich for formatted console output
-
-5. **Temporal layer** (`src/temporal/`)
-   - `workflows.py` — `ClinicalResearchWorkflow`: runs all tools in parallel, optional HITL approval gate
-   - `activities.py` — `execute_tool_activity`, `synthesize_results_activity` (all I/O lives here)
-   - `worker.py` — standalone worker process; task queue: `clinical-research-queue`, host: `localhost:7233`
-   - `client.py` — `run_research_sync` / `run_hitl_sync` helpers called by the CLI
 
 ### Tech Stack
 - **LLM Runtime**: LangChain + ChatOllama (local Ollama, extensible via LiteLLM)
-- **Orchestration**: Temporal.io with LangGraph ReAct for tool-calling
+- **Orchestration**: LangGraph ReAct for tool-calling
 - **Config Format**: YAML + Pydantic validation
 - **CLI Framework**: Click + Rich
 - **Runtime**: Python 3.12+
@@ -72,9 +59,6 @@ The core engine loads configs and initializes components—changes to agent beha
   - `class_name` is the implementation class (e.g., `PubMedTool`)
   - For MCP tools, add `tool_name` and `default_arg_key` under `config`
 
-### Temporal Workflow Constraint
-Temporal workflows (`src/temporal/workflows.py`) **must be deterministic** — no I/O, no randomness, no blocking calls, no direct time calls. All side effects (API calls, LLM inference) belong in activities. Use `workflow.unsafe.imports_passed_through()` for importing non-deterministic modules at the top of the file.
-
 ### Tool Implementation Pattern
 All tools inherit from `BaseTool` (`src/tools/base.py`) and implement `execute(input) -> Any`. Return `"Error: ..."` strings on failure (not exceptions) so the LLM can handle gracefully. API tools should mock `requests.get` in tests — see `tests/test_tools.py` for the pattern.
 
@@ -86,7 +70,6 @@ All tools inherit from `BaseTool` (`src/tools/base.py`) and implement `execute(i
 - `src/agent.py` — `SimpleAgent`, `ExecutionMetrics`
 - `src/cli.py` — Click CLI entry point
 - `src/logging_handler.py` — `ExecutionLogger` for audit trails
-- `src/temporal/` — Temporal workflow, activities, worker, client
 - `src/schemas/` — Pydantic models for tool configuration
 
 ### Dependencies
@@ -108,5 +91,5 @@ All tools inherit from `BaseTool` (`src/tools/base.py`) and implement `execute(i
 ## Notes
 - Clinical domain context is baked into system prompts — keep them domain-specific
 - LangGraph ReAct agent is only created when tools are configured in the agent config
-- Temporal tools run in parallel within `ClinicalResearchWorkflow`; timeouts: tools 30s, synthesis 120s, HITL approval 10min
+- Parallel tool execution via `run_parallel()`: all tools fan out concurrently with `asyncio.gather`; timeouts are handled per-tool
 - Expect rapid architectural changes; follow config-first pattern: define YAML structure before implementing logic

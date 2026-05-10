@@ -1,13 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict
-import requests
+
 from cachetools import TTLCache
 
 
 class BaseTool(ABC):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.session = requests.Session()
         ttl = config.get("cache_ttl", 300)
         maxsize = config.get("cache_maxsize", 128)
         self._cache: TTLCache = TTLCache(maxsize=maxsize, ttl=ttl)
@@ -15,7 +14,7 @@ class BaseTool(ABC):
     @abstractmethod
     def execute(self, input: Any) -> Any:
         """Execute the tool with given input."""
-        pass
+        ...
 
     def cached_execute(self, input: Any) -> Any:
         """Execute with TTL caching keyed on the string representation of input."""
@@ -29,5 +28,7 @@ class BaseTool(ABC):
         return self.__class__.__name__
 
     @property
+    @abstractmethod
     def description(self) -> str:
-        return self.config.get("description", self.name)
+        """Human-readable description of what this tool does."""
+        ...

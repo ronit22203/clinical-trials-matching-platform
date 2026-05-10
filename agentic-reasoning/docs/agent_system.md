@@ -105,7 +105,7 @@ def run_parallel(self, query: str) -> str
 
 Fans out all configured tool calls concurrently using `asyncio.gather`, then passes the aggregated results to the LLM for a single synthesis step. This bypasses the LangGraph ReAct loop entirely.
 
-**When to use.** Suitable for queries where every configured tool is relevant — e.g. a clinical research agent that always fetches from PubMed, openFDA, and ClinicalTrials.gov. The parallel fan-out mirrors what `ClinicalResearchWorkflow` does in Temporal, but without Temporal infrastructure.
+**When to use.** Suitable for queries where every configured tool is relevant — e.g. a clinical research agent that always fetches from PubMed, openFDA, and ClinicalTrials.gov. The parallel fan-out delivers low-latency aggregated results without the overhead of a ReAct loop.
 
 **When not to use.** Avoid for agents where tool selection should be conditional on the query. The ReAct loop (via `run()` or `stream()`) remains the default.
 
@@ -196,9 +196,9 @@ logger.log_execution(
 
 `self.metrics` is reassigned at the start of each `run()` call, so the last call's metrics are always available on `agent.metrics`.
 
-## Error Handling Behaviour
+**Error Handling Behaviour**
 
-`SimpleAgent.run()` and `SimpleAgent.stream()` do not have top-level exception handlers. LLM or tool errors propagate to the CLI. The `finally` block guarantees that `metrics.end_time` is always set, making latency data available for logging even when an error occurs. `run_parallel()` similarly propagates LLM invocation errors but catches asyncio task failures per-tool only if the tool itself returns an error string. The CLI catches connection errors for the Temporal path (see cli_interface.md) but not for `SimpleAgent`.
+`SimpleAgent.run()` and `SimpleAgent.stream()` do not have top-level exception handlers. LLM or tool errors propagate to the CLI. The `finally` block guarantees that `metrics.end_time` is always set, making latency data available for logging even when an error occurs. `run_parallel()` similarly propagates LLM invocation errors but catches asyncio task failures per-tool only if the tool itself returns an error string.
 
 ## Future Enhancements
 
