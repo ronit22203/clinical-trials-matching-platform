@@ -35,7 +35,6 @@ NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=testpassword
 QDRANT_URL=http://localhost:6333
-TEMPORAL_HOST=localhost:7233
 LM_STUDIO_BASE_URL=http://localhost:1234/v1
 ```
 
@@ -47,7 +46,7 @@ LM_STUDIO_BASE_URL=http://localhost:1234/v1
 make up
 ```
 
-This starts Neo4j, Qdrant, Temporal, Temporal UI, and PostgreSQL via Docker Compose. Wait for all health checks to pass (~30 seconds).
+This starts Neo4j and Qdrant via Docker Compose. Wait for all health checks to pass (~30 seconds).
 
 Verify:
 
@@ -168,7 +167,7 @@ Expected: non-empty `synthesis` and at least one entry in `toolsCalled`.
 | LM Studio 400 on KG extraction | `response_format` type mismatch | Ensure `config/app.yaml` knowledge_graph section does not set `response_format: {type: json_object}` |
 | `asyncio.run() cannot be called from a running event loop` | Sync `asyncio.run()` inside FastAPI endpoint | Ensure `agent.run_parallel()` is `async def` and is `await`ed in `server.py` |
 | UI shows no evidence after query | `NEXT_PUBLIC_USE_MOCK=true` | Set `NEXT_PUBLIC_USE_MOCK=false` in `platform-ui/.env.local` |
-| Port conflict | Another process on 7474 / 6333 / 8080 / 8000 / 3000 | `lsof -i :<port>` to identify and kill the conflicting process |
+| Port conflict | Another process on 7474 / 6333 / 8000 / 3000 | `lsof -i :<port>` to identify and stop the conflicting process |
 
 ---
 

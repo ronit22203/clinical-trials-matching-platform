@@ -101,7 +101,7 @@ echo ""
 # ── Data directories ──────────────────────────────────────────────────────────
 
 echo "Creating data directories…"
-for d in data/pdfs data/artifacts data/neo4j data/qdrant "data/temporal/postgres" data/models; do
+for d in data/pdfs data/artifacts data/neo4j data/qdrant data/models; do
   mkdir -p "$REPO_ROOT/$d"
 done
 ok "data/ subdirectories ready"
@@ -113,7 +113,7 @@ echo ""
 echo "Bootstrap complete. Next steps:"
 echo ""
 echo "  1. Start LM Studio, load a GGUF model, enable Local Server (port 1234)"
-echo "  make up         # Start Docker services (Neo4j, Qdrant, Temporal)"
+echo "  make up         # Start Docker services (Neo4j, Qdrant)"
 echo "  make validate   # Verify all services are reachable"
 echo "  make fetch      # Download sample PDFs (MAX_PDFS=5 default)"
 echo "  make ingest     # Run OCR → chunk → embed → graph pipeline"

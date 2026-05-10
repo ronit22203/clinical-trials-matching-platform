@@ -12,7 +12,7 @@ All make targets are defined in the repository root `Makefile`. Module-level tas
 | `make status` | Show Docker container states and artifact counts |
 | `make validate` | Check `.env`, LM Studio, Qdrant, and Neo4j connectivity |
 | `make bootstrap` | Create Python venvs and install all module dependencies |
-| `make up` | Start shared Docker infrastructure (Neo4j, Qdrant, Temporal) |
+| `make up` | Start shared Docker infrastructure (Neo4j, Qdrant) |
 | `make down` | Stop Docker services (data volumes are preserved) |
 
 ---
@@ -102,25 +102,12 @@ All make targets are defined in the repository root `Makefile`. Module-level tas
 | `make reasoning-run-query` | `QUERY="..."` | Single query (LangGraph) |
 | `make reasoning-serve-api` | — | Start FastAPI server on port 8000 |
 
-### Temporal workflow
-
-| Target | Parameters | Description |
-|--------|------------|-------------|
-| `make reasoning-temporal-up` | — | Start Temporal, Qdrant, Neo4j |
-| `make reasoning-temporal-down` | — | Stop Temporal and backing services |
-| `make reasoning-temporal-worker` | — | Start Temporal activity worker |
-| `make reasoning-temporal-run` | `QUERY="..."` | Single Temporal workflow query |
-| `make reasoning-temporal-run-hitl` | `QUERY="..."` | Single Temporal query with HITL gate |
-
 ### SGLang variants
 
 | Target | Description |
 |--------|-------------|
 | `make reasoning-sglang-run` | Interactive CLI against SGLang backend |
 | `make reasoning-sglang-run-query` | Single query via SGLang |
-| `make reasoning-sglang-run-temporal` | Interactive Temporal session via SGLang |
-| `make reasoning-temporal-run-sglang` | Single Temporal query via SGLang |
-| `make reasoning-temporal-run-hitl-sglang` | HITL query via SGLang |
 
 ### Services
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The tool system provides a plugin architecture for extending agent capabilities with external data sources. Tools are declared in YAML configuration files and loaded at runtime by `ToolRegistry`. Each implementation inherits from `BaseTool`, providing a uniform interface for both the LangGraph ReAct agent and the Temporal activity layer to invoke tools without knowing their concrete types.
+The tool system provides a plugin architecture for extending agent capabilities with external data sources. Tools are declared in YAML configuration files and loaded at runtime by `ToolRegistry`. Each implementation inherits from `BaseTool`, providing a uniform interface for both the LangGraph ReAct agent and the parallel fan-out path to invoke tools without knowing their concrete types.
 
 ## Source Locations
 
@@ -35,7 +35,7 @@ Accepts and stores the tool's configuration dictionary, which comes directly fro
 def execute(self, input: Any) -> Any
 ```
 
-Subclasses must implement this. Accepts either a plain string or a dictionary. Returns structured data (dict, list) or a plain string on error. The ReAct wrapper converts the return value to a string before passing it back to the LLM. The Temporal `execute_tool_activity` wraps this call with `asyncio.to_thread` to avoid blocking the event loop.
+Subclasses must implement this. Accepts either a plain string or a dictionary. Returns structured data (dict, list) or a plain string on error. The ReAct wrapper converts the return value to a string before passing it back to the LLM. `run_parallel()` wraps this call with `asyncio.to_thread` to avoid blocking the event loop.
 
 ### cached_execute
 
@@ -141,7 +141,7 @@ Any exception in steps 1–5 is caught and printed. Loading continues with remai
 
 **Output.** `{"total_reports": int, "results": [{"safety_report_id", "serious", "country", "sex", "reactions", "drugs"}]}`.
 
-**API key.** The tool reads the API key with the following precedence: `config["api_key"]` from the YAML config block, then `os.getenv("OPENFDA_API_KEY")` as a fallback. This means the key can be supplied via `.env` without modifying the tool YAML — important for the Temporal worker path, where `.env` is loaded at worker startup rather than inherited from the CLI.
+**API key.** The tool reads the API key with the following precedence: `config["api_key"]` from the YAML config block, then `os.getenv("OPENFDA_API_KEY")` as a fallback. This means the key can be supplied via `.env` without modifying the tool YAML.
 
 **Input sanitisation: _extract_drug_name.** This module-level function uses regular expressions to extract a bare drug or condition name from natural-language input. It strips prefixes such as "side effects of", "adverse events for", "I'm researching", and "what are the contraindications of". Without this step, passing a full sentence to the FDA API would produce a 400 Bad Request error. The function is imported and reused by `ClinicalTrialsTool`.
 
@@ -295,10 +295,10 @@ tool = MyTool({"base_url": "...", "timeout": 10})
 print(tool.execute("test input"))
 ```
 
-## Integration with Temporal
+## Integration with Parallel Execution
 
-The Temporal `execute_tool_activity` creates a fresh `ToolRegistry` per activity invocation and calls `tool.execute(query)` wrapped in `asyncio.to_thread`. This means:
+`run_parallel()` fans out `tool.cached_execute(query)` calls concurrently via `asyncio.to_thread` and `asyncio.gather`. This means:
 
-All tools must be safe to instantiate multiple times.
-The `config/tools/` directory must be accessible from the worker process's working directory.
-No tool state (including the TTL cache or the `requests.Session`) is shared between Temporal activity executions, because a new `ToolRegistry` and new tool instances are created for each activity.
+All tools must be safe to execute concurrently within a single process.
+The tool configuration directory must be accessible from the CLI or server working directory.
+Tool instances can share in-process state such as the TTL cache or `requests.Session`, but each new agent process starts with fresh instances.

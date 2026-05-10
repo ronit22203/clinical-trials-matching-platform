@@ -6,8 +6,6 @@ services:
   qdrant:
     url: ${QDRANT_URL}
     collection: medical_papers
-  temporal:
-    host: ${TEMPORAL_HOST}
 data_ingestion:
   project_root: .
   input_dir: ../data/pdfs
@@ -811,270 +809,37 @@ data_acquisition:
         priority: 1
         default: true
 agentic_reasoning:
-  defaults:
-    default_agent: local_assistant
+  agent:
     model: lmstudio/qwen3-8b
-    embed_model: text-embedding-nomic-embed-text-v1.5
-    max_tokens: 4096
-    temperature: 0.1
-    tools_enabled:
-    - graphrag
-    - mcp_filesystem
-  agents:
-    assistant:
-      name: Clinical Research Assistant
-      model: lmstudio/qwen3-8b
-      system_prompt: "You are a clinical research assistant with access to five specialized\
-        \ tools. Use them based on the nature of the request, not keyword matching.\n\
-        Tool guidance: - fda_adverse_events: drug safety data, adverse event reports,\
-        \ FDA alerts, side effects, contraindications - clinical_trials: trial recruitment,\
-        \ NCT IDs, phase/status/eligibility, interventional studies - pubmed_search:\
-        \ peer-reviewed literature, mechanisms, epidemiology, recent publications\
-        \ - graphrag: internal documents, local knowledge base, patient records, lab\
-        \ reports, institutional data - mcp_filesystem: reading or writing files on\
-        \ the local filesystem \u2014 save reports, read local data files\nWhen a\
-        \ query spans multiple domains, call ALL relevant tools before synthesizing.\
-        \ Do not answer from memory alone when tools can provide live or local data.\n\
-        When synthesizing results: - Treat graphrag results as primary internal evidence\
-        \ \u2014 do not dismiss them - If a tool returns an error, note it briefly\
-        \ and continue with available data - Structure your response clearly: findings\
-        \ first, gaps second, recommendations last - Be specific \u2014 cite trial\
-        \ IDs, drug names, paper titles when available"
-      model_params:
-        temperature: 0.1
-        max_tokens: 4096
-        top_p: 0.9
-        frequency_penalty: 0.0
-        presence_penalty: 0.0
-      tools:
-      - name: fda_adverse_events
-      - name: clinical_trials
-      - name: pubmed_search
-      - name: graphrag
-      - name: mcp_filesystem
-    local_assistant:
-      name: Local Clinical Research Assistant
-      model: lmstudio/qwen3-8b
-      system_prompt: "You are a clinical research assistant with access to a local\
-        \ knowledge base and filesystem tools. All operations run locally \u2014 no\
-        \ external APIs required.\nTool guidance: - graphrag: search internal medical\
-        \ documents, ingested PDFs, clinical evidence - mcp_filesystem: read or write\
-        \ files on the local filesystem\nWhen synthesizing results: - Treat graphrag\
-        \ results as primary evidence \u2014 do not dismiss them - If a tool returns\
-        \ an error, note it briefly and continue with available data - Structure your\
-        \ response: findings first, gaps second, recommendations last - Be specific\
-        \ \u2014 cite document names, trial IDs when available\nTo enable external\
-        \ tools (pubmed_search, clinical_trials, fda_adverse_events), switch to the\
-        \ 'assistant' agent config in app.yaml\
-        \ (requires internet access)."
-      model_params:
-        temperature: 0.1
-        max_tokens: 4096
-        top_p: 0.9
-        frequency_penalty: 0.0
-        presence_penalty: 0.0
-      tools:
-      - name: graphrag
-      - name: mcp_filesystem
-    mcp_test:
-      name: mcp_test_agent
-      model: lmstudio/qwen3-8b
-      system_prompt: 'You are an assistant that can access the local filesystem via
-        MCP.
+    system_prompt: >-
+      You are a clinical research assistant with access to an internal knowledge base.
+      You operate in a two-phase pipeline: evidence is always retrieved before you respond.
 
-        Use the mcp_filesystem tool to read files.
+      Synthesis rules:
+      - Answer ONLY from the [EVIDENCE] block provided in the user message.
+      - If evidence is empty or found=false, respond exactly: "No evidence found for this query."
+      - Do NOT use parametric memory or training knowledge when evidence is available.
+      - Cite document sources, chunk IDs, or trial IDs from vector_results when present.
+      - Structure your response: key findings → evidence gaps → clinical implications.
+    model_params:
+      temperature: 0.1
+      max_tokens: 4096
+      top_p: 0.9
+      frequency_penalty: 0.0
+      presence_penalty: 0.0
 
-        '
-      model_params:
-        temperature: 0.1
-        max_tokens: 1000
-      tools:
-      - name: mcp_filesystem
-    sglang_assistant:
-      name: Clinical Research Assistant (SGLang)
-      model: sglang/Qwen/Qwen2.5-7B-Instruct
-      system_prompt: "You are a clinical research assistant with access to five specialized\
-        \ tools. Use them based on the nature of the request, not keyword matching.\n\
-        Tool guidance: - fda_adverse_events: drug safety data, adverse event reports,\
-        \ FDA alerts, side effects, contraindications - clinical_trials: trial recruitment,\
-        \ NCT IDs, phase/status/eligibility, interventional studies - pubmed_search:\
-        \ peer-reviewed literature, mechanisms, epidemiology, recent publications\
-        \ - graphrag: internal documents, local knowledge base, patient records, lab\
-        \ reports, institutional data - mcp_filesystem: reading or writing files on\
-        \ the local filesystem \u2014 save reports, read local data files\nWhen a\
-        \ query spans multiple domains, call ALL relevant tools before synthesizing.\
-        \ Do not answer from memory alone when tools can provide live or local data.\n\
-        When synthesizing results: - Treat graphrag results as primary internal evidence\
-        \ \u2014 do not dismiss them - If a tool returns an error, note it briefly\
-        \ and continue with available data - Structure your response clearly: findings\
-        \ first, gaps second, recommendations last - Be specific \u2014 cite trial\
-        \ IDs, drug names, paper titles when available"
-      model_params:
-        temperature: 0.1
-        max_tokens: 4096
-        top_p: 0.9
-        frequency_penalty: 0.0
-        presence_penalty: 0.0
-      tools:
-      - name: fda_adverse_events
-      - name: clinical_trials
-      - name: pubmed_search
-      - name: graphrag
-      - name: mcp_filesystem
-  tools:
-    clinical_trials:
-      name: clinical_trials
-      description: Search ClinicalTrials.gov for studies by condition, drug, or intervention
-        name. Input should be a condition, drug, or disease name string.
-      type: api
-      module: src.tools.implementations.clinicaltrials
-      class_name: ClinicalTrialsTool
-      config:
-        base_url: https://clinicaltrials.gov
-        endpoint: /api/v2/studies
-        search_param: query.term
-        page_size_param: pageSize
-        limit: 5
-        timeout: 10
-        response:
-          results_key: studies
-          fields:
-            nct_id:
-            - protocolSection
-            - identificationModule
-            - nctId
-            title:
-            - protocolSection
-            - identificationModule
-            - briefTitle
-            status:
-            - protocolSection
-            - statusModule
-            - overallStatus
-            sponsor:
-            - protocolSection
-            - sponsorCollaboratorsModule
-            - leadSponsor
-            - leadSponsorName
-            summary:
-            - protocolSection
-            - descriptionModule
-            - briefSummary
-          summary_max_length: 300
-      auth:
-        type: none
-      rate_limit:
-        calls_per_minute: 100
-      enabled: true
-    fda_adverse_events:
-      name: fda_adverse_events
-      description: Query FDA adverse event reports by drug name. Input should be a
-        drug name string.
-      type: api
-      module: src.tools.implementations.openfda
-      class_name: OpenFDATool
-      config:
-        base_url: https://api.fda.gov
-        endpoint: /drug/event.json
-        search_param: patient.drug.medicinalproduct
-        limit: 5
-        timeout: 10
-        response:
-          results_key: results
-          total_path:
-          - meta
-          - results
-          - total
-          fields:
-            safety_report_id: safetyreportid
-            serious: serious
-            country: occurcountry
-            patient_sex:
-            - patient
-            - patientsex
-            reactions:
-            - patient
-            - reaction
-            - reactionmeddrapt
-            drugs:
-            - patient
-            - drug
-            - medicinalproduct
-      auth:
-        type: none
-      rate_limit:
-        calls_per_minute: 240
-      enabled: true
-    graphrag:
-      name: graphrag
-      description: Search medical literature and clinical documents using hybrid vector
-        + knowledge graph retrieval. Combines Qdrant semantic search with Neo4j entity
-        relationships. Input should be a natural language query about a clinical topic,
-        drug, condition, or study.
-      type: vector_db
-      module: src.tools.implementations.graphrag_tools
-      class_name: GraphRAGTool
-      config:
-        qdrant_url: ${QDRANT_URL}
-        collection: medical_papers
-        neo4j_uri: ${NEO4J_URI}
-        neo4j_username: ${NEO4J_USER}
-        neo4j_password: ${NEO4J_PASSWORD}
-        embedding_model: BAAI/bge-small-en-v1.5
-        model_cache_dir: data/models
-        limit: 3
-        neo4j_limit: 10
-        reranker_model: BAAI/bge-reranker-base
-        retrieval_k: null       # candidates to over-fetch before reranking; null = limit * 2
-      auth:
-        type: none
-      enabled: true
-    mcp_filesystem:
-      name: mcp_filesystem
-      description: Read and write files using MCP filesystem server. Allowed directories
-        include the Desktop and the project root.
-      module: src.tools.implementations.mcp_tool
-      class_name: MCPTool
-      config:
-        tool_name: write_file
-        default_arg_key: path
-        server:
-          command: npx
-          args:
-          - -y
-          - '@modelcontextprotocol/server-filesystem'
-          - /Users/ronitsaxena/Desktop
-          - /Users/ronitsaxena/Developer/clinical_agents
-          env: {}
-    pubmed_search:
-      name: pubmed_search
-      description: Search PubMed for biomedical literature. Input should be a search
-        query string (e.g., 'diabetes treatment metformin').
-      type: api
-      module: src.tools.implementations.pubmed
-      class_name: PubMedTool
-      config:
-        base_url: https://eutils.ncbi.nlm.nih.gov/entrez/eutils
-        search_endpoint: /esearch.fcgi
-        summary_endpoint: /esummary.fcgi
-        database: pubmed
-        limit: 5
-        timeout: 10
-        response:
-          id_path:
-          - esearchresult
-          - idlist
-          summary_results_key: result
-          fields:
-            title: title
-            journal: source
-            pub_date: pubdate
-            authors_field: authors
-            author_name_field: name
-            max_authors: 3
-          url_template: https://pubmed.ncbi.nlm.nih.gov/{pmid}/
-      auth:
-        type: none
-      rate_limit:
-        calls_per_minute: 60
-      enabled: true
+  graphrag:
+    config:
+      qdrant_url: ${QDRANT_URL}
+      collection: medical_papers
+      neo4j_uri: ${NEO4J_URI}
+      neo4j_username: ${NEO4J_USER}
+      neo4j_password: ${NEO4J_PASSWORD}
+      embedding_model: BAAI/bge-small-en-v1.5
+      model_cache_dir: data/models
+      limit: 3
+      neo4j_limit: 10
+      reranker_model: BAAI/bge-reranker-base
+      retrieval_k: null
+      cache_ttl: 300
+      cache_maxsize: 128

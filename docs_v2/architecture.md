@@ -31,8 +31,7 @@ No patient data leaves the host. All inference runs locally via LM Studio or Oll
              ▼                            ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │                      agentic-reasoning                             │
-│  Runtime A: LangGraph ReAct   (low-latency, interactive)          │
-│  Runtime B: Temporal Workflow (durable, auditable, HITL)          │
+│  Runtime: LangGraph ReAct     (low-latency, interactive)          │
 │  Tools: GraphRAG · PubMed · ClinicalTrials · FDA · Filesystem     │
 │  API: FastAPI  /api/query  /api/health                            │
 └────────────────────────────┬───────────────────────────────────────┘
@@ -62,7 +61,7 @@ No patient data leaves the host. All inference runs locally via LM Studio or Oll
 
 4. **Retrieval** — `HybridRetriever` executes a Qdrant vector search and a Neo4j graph traversal concurrently, then merges and re-ranks results. Used by the `graphrag` tool inside the agent.
 
-5. **Reasoning** — The agent receives a natural language query, selects tools (GraphRAG, PubMed, ClinicalTrials.gov, FDA, Filesystem), executes them—in parallel under Temporal or via `asyncio.gather` under LangGraph—and synthesises a structured response.
+5. **Reasoning** — The agent receives a natural language query, selects tools (GraphRAG, PubMed, ClinicalTrials.gov, FDA, Filesystem), executes them in parallel via `asyncio.gather` / `run_parallel()`, and synthesises a structured response.
 
 6. **Presentation** — The Next.js UI submits queries to the FastAPI server, receives a `QueryResponse` (synthesis + execution log + tool results), and renders evidence, reasoning trace, and execution metadata.
 
@@ -74,9 +73,6 @@ No patient data leaves the host. All inference runs locally via LM Studio or Oll
 |---------|-------|------|------|
 | Neo4j | `neo4j:5` | `7474` (HTTP), `7687` (Bolt) | Knowledge graph storage |
 | Qdrant | `qdrant/qdrant:latest` | `6333` (HTTP), `6334` (gRPC) | Vector store |
-| Temporal | `temporalio/auto-setup:latest` | `7233` | Durable workflow engine |
-| Temporal UI | `temporalio/ui:latest` | `8080` | Workflow observability |
-| PostgreSQL | `postgres:13` | internal | Temporal persistence backend |
 | LM Studio | host process | `1234` | Local LLM inference server |
 
 All services except LM Studio are Docker-managed. Configuration is in `docker-compose.local.yml`.
@@ -90,7 +86,7 @@ All runtime behaviour is defined in `config/app.yaml`. Source code is infrastruc
 ```
 config/
 └── app.yaml          # single non-secret source of truth
-    ├── services       # Neo4j, Qdrant, Temporal URIs (env-var references)
+    ├── services       # Neo4j and Qdrant connection settings (env-var references)
     ├── data_ingestion # pipeline stages, PII rules, chunking params, embedding model
     ├── data_acquisition # sources, storage providers, retry settings
     └── agentic_reasoning
@@ -104,9 +100,9 @@ Secrets are never stored in YAML. All sensitive values are environment variable 
 
 ---
 
-## Execution Runtimes
+## Execution Runtime
 
-Two execution paths share the same agent configuration and tool registry:
+The same agent configuration and tool registry drive a LangGraph ReAct runtime with concurrent tool execution via `asyncio.gather` and `run_parallel()`.
 
 ### LangGraph ReAct
 
@@ -114,18 +110,6 @@ Two execution paths share the same agent configuration and tool registry:
 - LLM autonomously selects and calls tools via `create_react_agent`
 - Tool calls execute concurrently via `asyncio.gather`
 - Suitable for low-latency interactive queries
-
-### Temporal Workflow
-
-- Invoked via `make reasoning-temporal-run` or `mode: temporal`
-- `ClinicalResearchWorkflow` is a durable, deterministic workflow registered with Temporal
-- All tool calls are `@activity.defn` functions executed by a worker process
-- Full audit trail: every activity input/output is persisted in Temporal's PostgreSQL store
-- Supports Human-in-the-Loop (HITL) gate: workflow pauses at a `@workflow.signal` checkpoint pending external approval
-
-### Determinism Constraint
-
-`workflows.py` must remain deterministic. No I/O, logging, `random`, `time`, or non-deterministic calls inside `@workflow.run`. All side effects go in `activities.py`.
 
 ---
 
@@ -170,4 +154,4 @@ Results are merged, deduplicated, and returned as ranked context chunks. The `gr
 - **No external inference calls**: all LLM inference is local (LM Studio / Ollama)
 - **PII redaction at ingestion time**: `EMAIL_ADDRESS`, `SG_NRIC` entities are replaced before any chunk is stored or embedded
 - **No hardcoded credentials**: all secrets are environment variables, never committed to source
-- **Audit trail**: Temporal persists every tool call input/output; FastAPI logs every query with a UUID execution ID
+- **Audit trail**: FastAPI logs every query with a UUID execution ID and records tool metadata in JSON execution logs

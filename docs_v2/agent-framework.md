@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `agentic-reasoning` module implements a dual-runtime agent framework. The same agent configuration and tool registry drive two execution paths: an interactive LangGraph ReAct loop and a durable Temporal workflow. Switching between them requires only a CLI flag or API request parameter.
+The `agentic-reasoning` module implements a LangGraph-based agent framework. The same agent configuration and tool registry drive an interactive ReAct loop, with optional concurrent tool fan-out via `run_parallel()` when deterministic prefetch is preferred.
 
 ---
 
@@ -63,70 +63,6 @@ tool_results = dict(await asyncio.gather(*tasks))
 `asyncio.to_thread` bridges synchronous tool implementations into the async call chain without blocking the event loop.
 
 **When to use:** Low-latency interactive queries, development, UI-backed sessions.
-
----
-
-## Execution Runtime B — Temporal Workflow
-
-**Entry points:**
-- CLI: `make reasoning-temporal-run QUERY="..."`
-- CLI with HITL: `make reasoning-temporal-run-hitl QUERY="..."`
-- API: `POST /api/query` with `mode: temporal`
-
-```
-CLI / API
-    │
-    ▼
-ClinicalResearchWorkflow.run()     ← @workflow.run (deterministic)
-    │
-    ├── activity: execute_tool(graphrag, query)
-    ├── activity: execute_tool(pubmed_search, query)
-    └── activity: execute_tool(clinical_trials, query)
-    │   (all activities run concurrently via asyncio.gather)
-    │
-    ▼
-synthesise_response()              ← LLM synthesis activity
-    │
-    [optional HITL gate]           ← @workflow.signal awaits external approval
-    │
-    ▼
-QueryResult
-```
-
-### Determinism constraint
-
-`workflows.py` must be fully deterministic. The following are prohibited inside `@workflow.run`, `@workflow.signal`, and `@workflow.query` methods:
-
-- I/O of any kind (network, filesystem, stdio)
-- `logging` calls
-- `random`, `time.time()`, `datetime.now()`
-- Non-deterministic imports
-
-All side effects belong in `activities.py` (`@activity.defn`).
-
-For non-deterministic imports required at the module level, use:
-
-```python
-with workflow.unsafe.imports_passed_through():
-    import some_non_deterministic_module
-```
-
-### Human-in-the-Loop (HITL)
-
-When invoked with `--hitl`, the workflow pauses at a `@workflow.signal` checkpoint after tool execution, before synthesis. An external signal must be sent to unblock it:
-
-```bash
-# Start the HITL workflow
-make reasoning-temporal-run-hitl QUERY="Assess EGFR inhibitor eligibility for this patient"
-
-# In a second terminal — approve the pending workflow
-temporal workflow signal \
-  --workflow-id <id> \
-  --name approve_synthesis \
-  --input '"proceed"'
-```
-
-The Temporal UI at `http://localhost:8080` shows all workflow states, activity histories, and pending signals.
 
 ---
 
@@ -252,7 +188,7 @@ Submit a query to the agent.
 {
   "query": "string (1–4096 characters)",
   "tools": ["graphrag", "pubmed_search"],   // optional override
-  "mode": "langgraph | temporal",           // default: langgraph
+  "mode": "langgraph",                     // default: langgraph
   "agent_config": "local_assistant"         // optional agent override
 }
 ```
@@ -294,18 +230,6 @@ make reasoning-run
 
 # Single query (LangGraph)
 make reasoning-run-query QUERY="What biomarkers predict sepsis mortality?"
-
-# Single query (Temporal)
-make reasoning-temporal-run QUERY="..."
-
-# Single query (Temporal + HITL)
-make reasoning-temporal-run-hitl QUERY="..."
-
-# Start Temporal infrastructure
-make reasoning-temporal-up
-
-# Start Temporal activity worker (separate terminal)
-make reasoning-temporal-worker
 
 # Start FastAPI server
 make reasoning-serve-api

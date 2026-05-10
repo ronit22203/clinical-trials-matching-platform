@@ -17,7 +17,7 @@ No API keys. No cloud. Just `git clone` + `docker-compose up`.
 git clone https://github.com/ronit22203/healthcare-platform
 cd healthcare-platform
 make bootstrap          # checks dependencies + creates .env.local
-make up                 # starts Neo4j, Qdrant, Temporal
+make up                 # starts Neo4j, Qdrant
 make fetch MAX_PDFS=5   # downloads sample PDFs
 make ingest             # OCR → chunk → embed → graph
 make serve              # starts API (port 8000) + UI (port 3000)
@@ -33,7 +33,7 @@ Open [http://localhost:3000](http://localhost:3000) → upload a patient case �
 |--------|--------------|
 | `data-acquisition` | Fetches PDFs from medRxiv, PubMed, ClinicalTrials |
 | `data-ingestion` | OCR (Surya) → PII redaction → chunking → Qdrant + Neo4j |
-| `agentic-reasoning` | LangGraph + Ollama LLM, Temporal workflows |
+| `agentic-reasoning` | LangGraph + Ollama LLM, parallel tool execution |
 | `platform-ui` | Next.js 14 dashboard for clinicians |
 
 ---
@@ -44,7 +44,6 @@ Open [http://localhost:3000](http://localhost:3000) → upload a patient case �
 |---------|-----|-------------|
 | Neo4j Browser | <http://localhost:7474> | `neo4j` / `testpassword` |
 | Qdrant Dashboard | <http://localhost:6333/dashboard> | – |
-| Temporal UI | <http://localhost:8080> | – |
 | Reasoning API | <http://localhost:8000> | – |
 | UI Dev Server | <http://localhost:3000> | – |
 
@@ -94,7 +93,7 @@ ollama pull cniongolo/biomistral:latest # biomistral (~2.5 GB)
 ## Troubleshooting (common)
 
 **Port conflict?**
-`lsof -i :7474` (Neo4j) / `:6333` (Qdrant) / `:8080` (Temporal) / `:8000` (API) / `:3000` (UI)
+`lsof -i :7474` (Neo4j) / `:6333` (Qdrant) / `:8000` (API) / `:3000` (UI)
 
 **Neo4j password mismatch?**
 `docker compose -f docker-compose.local.yml down -v && make up`
@@ -114,8 +113,7 @@ data/
 ├── pdfs/          # raw PDFs (input)
 ├── artifacts/     # ocr/, markdown/, cleaned/, chunks/
 ├── neo4j/         # graph DB
-├── qdrant/        # vector DB
-└── temporal/      # workflow DB
+└── qdrant/        # vector DB
 ```
 
 ---
@@ -125,7 +123,6 @@ data/
 - **Surya OCR** (MPS/CPU)
 - **Qdrant** (vector search)
 - **Neo4j** (graph reasoning)
-- **Temporal** (audit trails)
 - **Ollama** (local LLM)
 - **LangGraph** (agentic workflows)
 

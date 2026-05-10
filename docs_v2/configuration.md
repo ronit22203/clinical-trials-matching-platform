@@ -18,9 +18,6 @@ services:
   qdrant:
     url: ${QDRANT_URL}         # http://localhost:6333
     collection: medical_papers
-
-  temporal:
-    host: ${TEMPORAL_HOST}     # localhost:7233
 ```
 
 ---
@@ -293,7 +290,6 @@ All environment variables are referenced in `config/app.yaml` via `${VAR_NAME}` 
 | `NEO4J_USER` | ingestion, reasoning | Neo4j username |
 | `NEO4J_PASSWORD` | ingestion | Neo4j password |
 | `QDRANT_URL` | ingestion, reasoning | Qdrant HTTP URL, e.g. `http://localhost:6333` |
-| `TEMPORAL_HOST` | reasoning | Temporal server address, e.g. `localhost:7233` |
 | `LM_STUDIO_BASE_URL` | ingestion (KG), reasoning | LM Studio OpenAI-compatible base URL, e.g. `http://localhost:1234/v1` |
 | `AWS_ACCESS_KEY_ID` | acquisition | S3 access key (optional — enables S3 storage provider) |
 | `AWS_SECRET_ACCESS_KEY` | acquisition | S3 secret key (optional) |

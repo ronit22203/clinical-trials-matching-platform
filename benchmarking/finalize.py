@@ -62,6 +62,7 @@ def _build_summary(
     retrieval: dict[str, Any],
     extraction: dict[str, Any],
     inference: dict[str, Any],
+    reasoning: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Headline metrics — the numbers that go on the cover page of a report."""
     agg  = retrieval.get("aggregate", {})
@@ -69,6 +70,7 @@ def _build_summary(
     rel  = extraction.get("relation_metrics", {})
     ttft = inference.get("ttft_ms", {})
     tp   = inference.get("throughput_toks_per_sec", {})
+    ragg = (reasoning or {}).get("aggregate", {})
 
     failure_rate: float | None = None
     if inference.get("total_calls", 0) > 0:
@@ -95,6 +97,11 @@ def _build_summary(
         "ttft_p95_ms":          _val(ttft, "p95"),
         "throughput_tok_s":     _val(tp,   "mean"),
         "failure_rate":         failure_rate,
+        # --- Agent Reasoning ---
+        "agent_found_rate":     ragg.get("found_rate"),
+        "agent_latency_p50_ms": _val(ragg, "latency_ms", "p50"),
+        "agent_latency_p95_ms": _val(ragg, "latency_ms", "p95"),
+        "agent_mean_vector_hits": ragg.get("mean_vector_hits"),
     }
     # Drop None entries so missing stages don't pollute the summary block
     return {k: v for k, v in raw.items() if v is not None}
@@ -110,6 +117,7 @@ def finalize(run_dir: Path) -> dict[str, Any]:
     retrieval  = _safe_load(run_dir / "retrieval.json")
     extraction = _safe_load(run_dir / "extraction.json")
     inference  = _safe_load(run_dir / "inference.json")
+    reasoning  = _safe_load(run_dir / "reasoning.json")
 
     # Collect all pipeline_*.json timing files in stage order
     pipeline: dict[str, Any] = {}
@@ -118,7 +126,7 @@ def finalize(run_dir: Path) -> dict[str, Any]:
         stage = data.get("stage", timing_file.stem.removeprefix("pipeline_"))
         pipeline[stage] = data
 
-    summary = _build_summary(retrieval, extraction, inference)
+    summary = _build_summary(retrieval, extraction, inference, reasoning)
 
     manifest.update({
         "run_type": "deterministic",
@@ -127,6 +135,7 @@ def finalize(run_dir: Path) -> dict[str, Any]:
             "retrieval":  retrieval,
             "extraction": extraction,
             "inference":  inference,
+            "reasoning":  reasoning,
         },
         "summary": summary,
     })

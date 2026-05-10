@@ -9,7 +9,7 @@
 | [Quickstart](quickstart.md) | Prerequisites, installation, and first run |
 | [Architecture](architecture.md) | System design, module topology, data flow |
 | [Data Pipeline](data-pipeline.md) | Six-stage ingestion pipeline reference |
-| [Agent Framework](agent-framework.md) | Dual runtime, tool plugin system, HITL gate |
+| [Agent Framework](agent-framework.md) | LangGraph ReAct runtime and tool plugin system |
 
 ## Reference
 
@@ -22,7 +22,7 @@
 ## Module Overview
 
 ```
-agentic-reasoning/   LangGraph ReAct + Temporal durable workflows
+agentic-reasoning/   LangGraph ReAct + concurrent tool execution
 data-acquisition/    Multi-source PDF fetcher (medRxiv, bioRxiv, PubMed, ClinicalTrials.gov)
 data-ingestion/      PDF → OCR → Markdown → Clean → Chunk → Embed (Qdrant + Neo4j)
 platform-ui/         Next.js 16 App Router frontend

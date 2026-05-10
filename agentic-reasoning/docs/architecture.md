@@ -12,9 +12,9 @@ Clinical Agents is built on a configuration-first, separation-of-concerns archit
 
 **Loose Coupling via Interfaces.** Components depend on abstractions, not concrete implementations. The agent depends on BaseTool, not OpenFDATool. The CLI depends on SimpleAgent, not ChatOllama.
 
-**Lazy Loading.** Tools are loaded only when a tools directory exists and is non-empty. The Temporal workflow path is only initialised when --use-temporal is passed. This reduces startup overhead and keeps failure domains isolated.
+**Lazy Loading.** Tools are loaded only when a tools directory exists and is non-empty. This reduces startup overhead and keeps failure domains isolated.
 
-**Dual Execution Modes.** The system provides two runtime paths: a synchronous ReAct agent via LangGraph for interactive and latency-sensitive use, and a durable Temporal workflow for long-running, retryable, parallel execution.
+**Flexible Execution Modes.** The system provides a synchronous ReAct agent via LangGraph for interactive and latency-sensitive use, plus a parallel fan-out path via `run_parallel()` when deterministic concurrent tool execution is preferred.
 
 ## Component Map
 
@@ -38,14 +38,7 @@ CLI (src/cli.py)
     |                |
     |                +-- LangChain ChatOllama (direct mode)
     |                +-- LangGraph ReAct Agent (tool mode)
-    |
-    +-- OR --> Temporal Client (src/temporal/client.py)
-    |                |
-    |                v
-    |            ClinicalResearchWorkflow (src/temporal/workflows.py)
-    |                |
-    |                +-- execute_tool_activity (parallel, retried)
-    |                +-- synthesize_results_activity
+    |                +-- run_parallel() fan-out (concurrent tool mode)
     |
     +-- log --> ExecutionLogger (src/logging_handler.py)
                      |
@@ -71,13 +64,13 @@ When `self._agent` is `None`, `SimpleAgent.run()` constructs a message list cont
 
 When `self._agent` is set, `run()` passes a single `HumanMessage` to the ReAct agent. The agent uses the LLM to decide which tools to call, invokes them via the wrapped `@lc_tool` functions, feeds results back to the LLM, and iterates until a final answer is produced. Each tool invocation appends the tool name to `metrics.tools_called`.
 
-## Query Execution: Temporal Workflow Mode
+## Query Execution: Parallel Tool Mode
 
-When `--use-temporal` is passed, the CLI skips `SimpleAgent` entirely and calls `run_research_sync()` from `src/temporal/client.py`. This connects to a Temporal server, starts a `ClinicalResearchWorkflow`, and blocks until the result is returned. The workflow runs all configured tool activities in parallel using `asyncio.gather`, then passes aggregated results to the synthesis activity. Each activity has an independent retry policy and timeout. The worker process (`src/temporal/worker.py`) must be running separately.
+When concurrent fan-out is selected, the CLI calls `SimpleAgent.run_parallel()`. This wraps each `tool.cached_execute(query)` call in `asyncio.to_thread`, awaits all tasks with `asyncio.gather`, and then passes the aggregated tool results to the synthesis step. This mode keeps orchestration inside the application process while still parallelising external tool calls.
 
 ## Logging Phase
 
-After every execution (both direct and Temporal), the CLI calls `_log_execution()`, which extracts metrics from the agent and calls `ExecutionLogger.log_execution()`. The logger writes a complete JSON object to `log/{execution_id}.json` and appends the same object as a single line to `log/summary.jsonl`. The current Git commit hash is captured and included in the log entry.
+After every execution (direct, ReAct, or parallel), the CLI calls `_log_execution()`, which extracts metrics from the agent and calls `ExecutionLogger.log_execution()`. The logger writes a complete JSON object to `log/{execution_id}.json` and appends the same object as a single line to `log/summary.jsonl`. The current Git commit hash is captured and included in the log entry.
 
 ## Data Flow: Direct Query Example
 
@@ -101,17 +94,16 @@ A user runs: `python -m src.cli "Side effects of metformin?"`
 5. The LLM synthesises a final answer from the tool results.
 6. CLI displays the response. Logger writes log entry with `tools_called: ["fda_adverse_events", "pubmed_search"]`.
 
-## Data Flow: Temporal Workflow Example
+## Data Flow: Parallel Tool Example
 
-A user runs: `python -m src.cli --use-temporal "Side effects of semaglutide?"`
+A user runs: `python -m src.cli --parallel "Side effects of semaglutide?"`
 
-1. CLI loads config, extracts tool names and model.
-2. Calls `run_research_sync()` which connects to Temporal on `localhost:7233`.
-3. `ClinicalResearchWorkflow.run()` schedules three tool activities in parallel.
-4. Each activity loads a fresh `ToolRegistry` and calls `tool.execute()` in a thread.
-5. Results are gathered; `synthesize_results_activity` calls the LLM with all context.
-6. Workflow returns structured result to the CLI.
-7. CLI displays the synthesis and logs execution with `router_intent: "temporal"`.
+1. CLI loads config and constructs `SimpleAgent` with the configured tools.
+2. `run_parallel()` selects the requested tools and wraps each `tool.cached_execute()` call in `asyncio.to_thread`.
+3. `asyncio.gather` schedules the tool calls concurrently.
+4. Results are gathered into a single tool-result map.
+5. The synthesis step calls the LLM with all aggregated context.
+6. CLI displays the synthesis and logs execution with `router_intent: "parallel"`.
 
 ## Design Patterns
 
@@ -123,36 +115,25 @@ A user runs: `python -m src.cli --use-temporal "Side effects of semaglutide?"`
 
 **Composition.** `SimpleAgent` composes `ChatOllama`, an optional `ToolRegistry`, and an optional ReAct agent rather than inheriting from any of them.
 
-**Command.** The Temporal workflow encapsulates an entire research operation as a durable, serialisable unit of work.
+**Command.** `run_parallel()` encapsulates fan-out and synthesis as a repeatable execution path for deterministic multi-tool queries.
 
 ## Fault Tolerance
 
 **Tool loading failures.** Invalid YAML or missing implementation classes are caught per-tool. The registry continues with all remaining tools.
 
-**Tool invocation failures.** In ReAct mode, tool errors are returned as strings and included in the LLM context. In Temporal mode, failed activities are retried up to three times with exponential backoff; persistent failures are captured as error strings and passed to the synthesis step.
-
-**Temporal worker unavailability.** The CLI catches the connection error, displays an actionable message (run `make temporal-worker`), and exits cleanly.
+**Tool invocation failures.** In ReAct mode, tool errors are returned as strings and included in the LLM context. In parallel mode, failed tool calls are captured as error strings and passed to the synthesis step alongside successful results.
 
 **LLM unavailability.** `SimpleAgent.run()` does not catch LLM errors; they propagate to the CLI and are displayed to the user. The `finally` block ensures `metrics.end_time` is always recorded.
 
 ## Data Directories
 
-The project has two distinct data directories with different purposes:
-
-**`data/`** — project runtime data, committed to `.gitignore`, owned by the application.
+The project stores runtime data under `data/`, committed to `.gitignore` and owned by the application.
 
 | Path | Contents |
 |---|---|
 | `data/models/` | Cached HuggingFace embedding models. Populated by `make download-models` or on first `GraphRAGTool` invocation. The `BAAI/bge-small-en-v1.5` model is stored here as `models--BAAI--bge-small-en-v1.5/`. |
-| `data/postgres/` | PostgreSQL data volume for Temporal's backing database. Mapped by `infra/docker-compose.yml` (`./data/postgres`). |
 
-**`infra/data/`** — Docker volume mounts for infrastructure services defined in `infra/docker-compose.graphrag.yml`.
-
-| Path | Contents |
-|---|---|
-| `infra/data/postgres/` | PostgreSQL data volume for the Temporal service (same volume as `data/postgres/`, resolved relative to the compose file location). |
-
-Neither directory is committed to source control. Delete them to reset infrastructure state; re-run `make services-up` and `make download-models` to restore.
+This directory is not committed to source control. Delete it to reset local model state; re-run `make download-models` to restore.
 
 ## Extensibility Points
 
@@ -160,7 +141,7 @@ Neither directory is committed to source control. Delete them to reset infrastru
 
 **New agents.** Create a YAML file in `config/agentic-reasoning/agents/`. No code changes needed.
 
-**New workflow types.** Add new `@workflow.defn` classes in `src/temporal/` and register them in the worker.
+**New execution strategies.** Add new orchestration paths in `src/agent.py` or the CLI when a new concurrency or routing strategy is needed.
 
 **New configuration schemas.** Add Pydantic models in `src/schemas/` with a corresponding loader function.
 

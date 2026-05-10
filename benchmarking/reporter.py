@@ -53,6 +53,7 @@ def generate_report(run_dir: Path) -> str:
     retrieval = _read_json(run_dir / "retrieval.json")
     extraction = _read_json(run_dir / "extraction.json")
     inference = _read_json(run_dir / "inference.json")
+    reasoning = _read_json(run_dir / "reasoning.json")
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     git_commit = (manifest or {}).get("git_commit", "unknown")[:8]
@@ -255,6 +256,54 @@ def generate_report(run_dir: Path) -> str:
                     f"| {_ms(r.get('mean_throughput'))} |"
                 )
         lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # ── Agent Reasoning ───────────────────────────────────────────────────────
+    if reasoning:
+        agg = reasoning.get("aggregate", {})
+        rcfg = reasoning.get("config", {})
+        latency = agg.get("latency_ms", {})
+        per_query = reasoning.get("per_query", [])
+
+        lines.append("## Agent Reasoning")
+        lines.append("")
+        lines.append(
+            f"{rcfg.get('queries_count', '?')} queries, "
+            f"model `{rcfg.get('model', '?')}`, "
+            f"collection `{rcfg.get('graphrag_collection', '?')}`"
+        )
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
+        lines.append(f"| Found rate | {_pct(agg.get('found_rate'))} ({agg.get('found_count', 'N/A')}/{rcfg.get('queries_count', '?')}) |")
+        lines.append(f"| Failures | {agg.get('failure_count', 0)} |")
+        lines.append(f"| Latency p50 | {_ms(latency.get('p50'))} ms |")
+        lines.append(f"| Latency p95 | {_ms(latency.get('p95'))} ms |")
+        lines.append(f"| Latency mean | {_ms(latency.get('mean'))} ms |")
+        lines.append(f"| Mean vector hits | {agg.get('mean_vector_hits', 'N/A')} |")
+        lines.append(f"| Mean graph facts | {agg.get('mean_graph_facts', 'N/A')} |")
+        lines.append(f"| Mean synthesis length | {agg.get('mean_synthesis_len', 'N/A')} chars |")
+        lines.append("")
+
+        if per_query:
+            lines.append("**Per-query breakdown:**")
+            lines.append("")
+            lines.append("| ID | Found | Latency (ms) | Vector Hits | Graph Facts | Synthesis (snippet) |")
+            lines.append("|----|-------|-------------|-------------|-------------|---------------------|")
+            for q in per_query[:20]:  # cap at 20 rows
+                found_icon = "✓" if q.get("found") else "✗"
+                snippet = (q.get("synthesis_snippet") or "")[:60].replace("|", "\\|")
+                lines.append(
+                    f"| `{q.get('query_id', '?')}` "
+                    f"| {found_icon} "
+                    f"| {_ms(q.get('latency_ms'))} "
+                    f"| {q.get('vector_hits', 0)} "
+                    f"| {q.get('graph_facts', 0)} "
+                    f"| {snippet}… |"
+                )
+            lines.append("")
+
         lines.append("---")
         lines.append("")
 
