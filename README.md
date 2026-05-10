@@ -20,10 +20,8 @@ make bootstrap          # checks dependencies + creates .env.local
 make up                 # starts Neo4j, Qdrant
 make fetch MAX_PDFS=5   # downloads sample PDFs
 make ingest             # OCR → chunk → embed → graph
-make serve              # starts API (port 8000) + UI (port 3000)
+make reasoning-run-query QUERY="What biomarkers predict sepsis mortality?"
 ```
-
-Open [http://localhost:3000](http://localhost:3000) → upload a patient case → get clinical trial matches.
 
 ---
 

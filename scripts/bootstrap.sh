@@ -89,11 +89,15 @@ else
   warn "Review .env.local and set LLM_MODEL to a model you have loaded in LM Studio."
 fi
 
-if [ -f "$REPO_ROOT/platform-ui/.env.local" ]; then
-  ok "platform-ui/.env.local already exists (skipping)"
+if [ -f "$REPO_ROOT/platform-ui/.env.local.example" ]; then
+  if [ -f "$REPO_ROOT/platform-ui/.env.local" ]; then
+    ok "platform-ui/.env.local already exists (skipping)"
+  else
+    cp "$REPO_ROOT/platform-ui/.env.local.example" "$REPO_ROOT/platform-ui/.env.local"
+    ok "Created platform-ui/.env.local"
+  fi
 else
-  cp "$REPO_ROOT/platform-ui/.env.local.example" "$REPO_ROOT/platform-ui/.env.local"
-  ok "Created platform-ui/.env.local"
+  warn "platform-ui not present in this build — skipping UI env setup"
 fi
 
 echo ""

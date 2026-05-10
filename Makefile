@@ -129,27 +129,28 @@ up: ## Start shared infrastructure and API/UI services
 down: ## Stop shared infrastructure and API/UI services
 	@docker compose -f docker-compose.local.yml down
 
-serve: ## Start API and UI together
-	@$(MAKE) --no-print-directory serve-api & \
-	$(MAKE) --no-print-directory serve-ui && \
-	wait
+serve: ## Start the reasoning agent in interactive CLI mode
+	@$(MAKE) --no-print-directory reasoning-run
 
-serve-api: reasoning-serve-api ## Alias for reasoning-serve-api
+serve-api: ## Print usage — no HTTP server; use reasoning-run-query
+	@printf "$(YELLOW)No HTTP API server in this build.$(NC)\n"
+	@printf "  Single query:    $(CYAN)make reasoning-run-query QUERY=\"...\"$(NC)\n"
+	@printf "  Interactive CLI: $(CYAN)make reasoning-run$(NC)\n"
 
-serve-ui: ui-dev ## Alias for ui-dev
+serve-ui: ## Print usage — platform-ui not present in this build
+	@printf "$(YELLOW)platform-ui is not installed in this build.$(NC)\n"
 
-ui-install: ## Install the Next.js UI dependencies
-	@cd $(UI_DIR) && $(UI_PACKAGE_MANAGER) install
+ui-install: ## platform-ui not present
+	@printf "$(YELLOW)platform-ui is not installed in this build.$(NC)\n"
 
-ui-dev: ## Start the Next.js UI in dev mode
-	@cd $(UI_DIR) && $(UI_PACKAGE_MANAGER) run dev
+ui-dev: ## platform-ui not present
+	@printf "$(YELLOW)platform-ui is not installed in this build.$(NC)\n"
 
-ui-build: ## Build the Next.js UI
-	@cd $(UI_DIR) && $(UI_PACKAGE_MANAGER) run build
+ui-build: ## platform-ui not present
+	@printf "$(YELLOW)platform-ui is not installed in this build.$(NC)\n"
 
-ui-start: ## Build (if needed) and start the Next.js UI in production mode
-	@test -d $(UI_DIR)/.next || { echo "No production build found — running ui-build first..."; $(MAKE) --no-print-directory ui-build; }
-	@cd $(UI_DIR) && $(UI_PACKAGE_MANAGER) run start
+ui-start: ## platform-ui not present
+	@printf "$(YELLOW)platform-ui is not installed in this build.$(NC)\n"
 
 fetch: acquisition-fetch ## Fetch PDFs via data-acquisition
 

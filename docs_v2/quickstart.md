@@ -6,7 +6,6 @@
 |-------------|----------------|-------|
 | Docker Desktop | 4.x (Compose v2) | `docker compose version` must succeed |
 | Python | 3.11.14 (ingestion) / 3.12+ (reasoning, acquisition) | Use `pyenv` to manage versions |
-| Node.js | 18+ | Required for `platform-ui` |
 | LM Studio | 0.3+ | Provides local LLM inference on port 1234 |
 | Make | GNU Make | Pre-installed on macOS/Linux |
 
@@ -19,12 +18,11 @@ git clone https://github.com/ronit22203/clinical-trials-matching-platform
 cd clinical-trials-matching-platform
 ```
 
-Copy environment files for each module that requires them:
+Copy environment files:
 
 ```bash
 cp data-ingestion/.env.example data-ingestion/.env
 cp agentic-reasoning/.env.example agentic-reasoning/.env
-cp platform-ui/.env.local.example platform-ui/.env.local
 ```
 
 Edit each `.env` to match your environment. At minimum, set:
@@ -115,46 +113,17 @@ make ingestion-neo4j-stats     # shows node and relationship counts in Neo4j
 
 ---
 
-## Step 6 — Start the API and UI
-
-```bash
-make serve
-```
-
-This starts:
-- FastAPI reasoning server at `http://localhost:8000`
-- Next.js UI at `http://localhost:3000`
-
-Navigate to `http://localhost:3000/cases/990219` to open the case view.
-
----
-
-## Step 7 — Run a query
-
-In the UI chat panel, type a query such as:
-
-```
-Do sepsis early-warning systems detect biological signal or care-process intensity?
-```
-
-Or from the terminal:
+## Step 6 — Run a query
 
 ```bash
 make reasoning-run-query QUERY="What biomarkers predict sepsis mortality?"
 ```
 
----
-
-## Verify the full stack
+Or start the interactive CLI:
 
 ```bash
-curl -s -X POST http://localhost:8000/api/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is AUROC?", "mode": "langgraph"}' \
-  | jq '{synthesis: .synthesis[:120], tools: .executionLog.toolsCalled}'
+make reasoning-run
 ```
-
-Expected: non-empty `synthesis` and at least one entry in `toolsCalled`.
 
 ---
 
@@ -165,9 +134,7 @@ Expected: non-empty `synthesis` and at least one entry in `toolsCalled`.
 | `make validate` fails on Neo4j | Password mismatch from previous install | `docker compose -f docker-compose.local.yml down -v && make up` |
 | `No chunks found` on ingest | `data/artifacts/chunk/` empty | Run `make fetch` first, or check that PDFs landed in `data/pdfs/` |
 | LM Studio 400 on KG extraction | `response_format` type mismatch | Ensure `config/app.yaml` knowledge_graph section does not set `response_format: {type: json_object}` |
-| `asyncio.run() cannot be called from a running event loop` | Sync `asyncio.run()` inside FastAPI endpoint | Ensure `agent.run_parallel()` is `async def` and is `await`ed in `server.py` |
-| UI shows no evidence after query | `NEXT_PUBLIC_USE_MOCK=true` | Set `NEXT_PUBLIC_USE_MOCK=false` in `platform-ui/.env.local` |
-| Port conflict | Another process on 7474 / 6333 / 8000 / 3000 | `lsof -i :<port>` to identify and stop the conflicting process |
+| Port conflict | Another process on 7474 / 6333 / 8000 | `lsof -i :<port>` to identify and stop the conflicting process |
 
 ---
 
