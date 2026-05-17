@@ -33,7 +33,7 @@ make reasoning-run-query QUERY="What biomarkers predict sepsis mortality?"
 |--------|--------------|
 | `data-acquisition` | Fetches PDFs from medRxiv, PubMed, ClinicalTrials |
 | `data-ingestion` | OCR (Surya) → PII redaction → chunking → Qdrant + Neo4j |
-| `agentic-reasoning` | LangGraph + Ollama LLM, parallel tool execution |
+| `agentic-reasoning` | Deterministic two-phase pipeline: GraphRAG retrieval → LLM synthesis (LM Studio / SGLang / Ollama) |
 | `platform-ui` | Next.js 14 dashboard for clinicians |
 
 ---
@@ -77,15 +77,20 @@ Change any setting → rerun `make ingest` – deterministic rebuild.
 ## Prerequisites
 
 - [Docker Desktop](https://docker.com) (Compose v2)
-- [Ollama](https://ollama.ai) (`brew install ollama`)
 - Python 3.11+ + Node.js 18+
+- LLM backend — pick one:
+  - **[LM Studio](https://lmstudio.ai)** (default; local, no GPU required)
+  - **[SGLang](https://github.com/sgl-project/sglang)** (production; recommended for GPU, e.g. RTX 5080)
+  - **[Ollama](https://ollama.ai)** (`brew install ollama`) — alternative
 
-### Required Ollama models
+### LM Studio / Ollama models
 
-```bash
-ollama pull qwen3:8b          # reasoning (~5 GB)
-ollama pull nomic-embed-text  # embeddings (~274 MB)
-ollama pull cniongolo/biomistral:latest # biomistral (~2.5 GB)
+Pull `qwen3:8b` (reasoning) for whichever backend you use. The model name is set in `config/app.yaml` — prefix it with `lmstudio/`, `sglang/`, or `ollama/` to select the backend:
+
+```yaml
+# config/app.yaml
+agent:
+  model: "lmstudio/qwen3-8b"   # or sglang/qwen3-8b, ollama/qwen3:8b
 ```
 
 ---
@@ -98,8 +103,10 @@ ollama pull cniongolo/biomistral:latest # biomistral (~2.5 GB)
 **Neo4j password mismatch?**
 `docker compose -f docker-compose.local.yml down -v && make up`
 
-**Ollama not responding?**
-`ollama serve` (in a separate terminal)
+**LLM backend not responding?**
+- LM Studio: ensure the server is running on `http://localhost:1234/v1`
+- SGLang: `SGLANG_BASE_URL=http://localhost:30000/v1` (set in `.env.local`)
+- Ollama: `ollama serve` (in a separate terminal)
 
 **UI shows mock data?**
 Set `NEXT_PUBLIC_USE_MOCK=false` in `platform-ui/.env.local` and ensure API is running (`make serve-api`).
@@ -123,8 +130,7 @@ data/
 - **Surya OCR** (MPS/CPU)
 - **Qdrant** (vector search)
 - **Neo4j** (graph reasoning)
-- **Ollama** (local LLM)
-- **LangGraph** (agentic workflows)
+- **LM Studio / SGLang / Ollama** (local LLM inference — model-agnostic via `config/app.yaml`)
 
 ---
 
