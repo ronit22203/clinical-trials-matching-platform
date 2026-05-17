@@ -1,4 +1,6 @@
 import os
+import hashlib
+import re
 import uuid
 from typing import List, Dict, Any
 from pathlib import Path
@@ -23,6 +25,34 @@ class ConfigLoader:
     @staticmethod
     def load(config_path: str = None) -> Dict[str, Any]:
         return load_ingestion_config(config_path)
+
+
+_HASH_STEM_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+_DOI_RE = re.compile(r"10\.\d{4,9}/([^\s\"'<>]+)", re.IGNORECASE)
+
+
+def _chunk_sha256(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _canonical_source_name(file_path: Path, text: str) -> str:
+    """
+    Canonicalize hash-backed source names (64-hex stems) to DOI-based cleaned names
+    when DOI evidence exists in the document text.
+    """
+    stem = file_path.stem
+    if not _HASH_STEM_RE.fullmatch(stem):
+        return file_path.name
+
+    match = _DOI_RE.search(text)
+    if not match:
+        return file_path.name
+
+    doi_suffix = match.group(1).rstrip(").,;")
+    safe_suffix = re.sub(r"[^A-Za-z0-9._-]+", "_", doi_suffix)
+    if not safe_suffix:
+        return file_path.name
+    return f"{safe_suffix}_cleaned.md"
 
 
 class MedicalVectorizer:
@@ -97,6 +127,7 @@ class MedicalVectorizer:
 
         with open(file_path, "r", encoding="utf-8") as f:
             text = f.read()
+        canonical_source = _canonical_source_name(file_path, text)
 
         # Step 1: Clean the markdown
         cleaned_text = self.cleaner.clean(text)
@@ -116,10 +147,17 @@ class MedicalVectorizer:
         filter_boilerplate: bool = chunk_config.get('filter_boilerplate', True)
         
         skipped_boilerplate = 0
+        skipped_duplicate_content = 0
+        seen_chunk_hashes: set[str] = set()
         for i, chunk in enumerate(chunks):
             if filter_boilerplate and chunk.get('is_boilerplate', False):
                 skipped_boilerplate += 1
                 continue
+            chunk_hash = _chunk_sha256(chunk['content'])
+            if chunk_hash in seen_chunk_hashes:
+                skipped_duplicate_content += 1
+                continue
+            seen_chunk_hashes.add(chunk_hash)
             # Embed the chunk content
             embedding = self.embedding_model.encode(
                 chunk['content'],
@@ -128,17 +166,19 @@ class MedicalVectorizer:
             
             # Prepare metadata
             metadata = {
-                'source': file_path.name,
+                'source': canonical_source,
+                'source_original': file_path.name,
                 'content': chunk['content'],
                 'context': chunk['context'],
                 'level': chunk['level'],
                 'chunk_index': i,
-                'page_number': chunk.get('page_number', 1)
+                'page_number': chunk.get('page_number', 1),
+                'content_sha256': chunk_hash,
             }
             
             # Create Qdrant point
             point = PointStruct(
-                id=str(uuid.uuid4()),
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_hash)),
                 vector=embedding,
                 payload=metadata
             )
@@ -154,6 +194,8 @@ class MedicalVectorizer:
         
         if skipped_boilerplate:
             print(f"  ↳ Skipped {skipped_boilerplate} boilerplate chunk(s) (preprint headers/footers)")
+        if skipped_duplicate_content:
+            print(f"  ↳ Skipped {skipped_duplicate_content} duplicate chunk(s) by content SHA-256")
         print(f"✓ Indexed {len(points)} chunks from {file_path.name}")
 
     def run(self, input_dir_path: str = None):

@@ -56,7 +56,19 @@ def _recall_at_k(ranked_grades: list[int], k: int, total_relevant: int) -> float
     if total_relevant == 0:
         return 0.0
     hits = sum(1 for g in ranked_grades[:k] if g > 0)
-    return hits / total_relevant
+    return min(1.0, hits / total_relevant)
+
+
+def _retrieval_identity(chunk: dict[str, Any]) -> tuple[Any, ...]:
+    """
+    Build a stable identity for a retrieved chunk so duplicate source variants
+    do not get counted multiple times in retrieval metrics.
+    """
+    content_sha = chunk.get("content_sha256")
+    if content_sha:
+        return ("sha256", content_sha)
+    canonical_source = chunk.get("canonical_source") or chunk.get("source", "")
+    return ("source_chunk", canonical_source, chunk.get("chunk_index"))
 
 
 def _precision_at_k(ranked_grades: list[int], k: int) -> float:
@@ -201,6 +213,8 @@ class RetrievalEvaluator:
                 "chunk_index": h.payload.get("chunk_index", -1),
                 "vector_score": round(h.score, 6),
                 "source": h.payload.get("source", ""),
+                "canonical_source": h.payload.get("source", ""),
+                "content_sha256": h.payload.get("content_sha256"),
                 "page_number": h.payload.get("page_number"),
                 "content": h.payload.get("content", ""),
                 "content_preview": h.payload.get("content", "")[:80],
@@ -225,6 +239,8 @@ class RetrievalEvaluator:
                 "chunk_index": c["chunk_index"],
                 "score": c[score_field],
                 "source": c["source"],
+                "canonical_source": c["canonical_source"],
+                "content_sha256": c["content_sha256"],
                 "page_number": c["page_number"],
                 "content_preview": c["content_preview"],
             }
@@ -240,13 +256,34 @@ class RetrievalEvaluator:
         log.info("  [%s] %s", qid, qtext[:70])
         retrieved = self._query(qtext)
 
+        deduped_retrieved: list[dict[str, Any]] = []
+        seen_keys: set[tuple[Any, ...]] = set()
+        duplicate_sources: set[str] = set()
+        duplicate_count = 0
+        for item in retrieved:
+            identity = _retrieval_identity(item)
+            if identity in seen_keys:
+                duplicate_count += 1
+                duplicate_sources.add(item.get("canonical_source") or item.get("source", ""))
+                continue
+            seen_keys.add(identity)
+            deduped_retrieved.append(item)
+
+        if duplicate_count:
+            log.warning(
+                "Duplicate retrieved sources detected for query %s: removed %d duplicate chunk(s). Sources: %s",
+                qid,
+                duplicate_count,
+                ", ".join(sorted(s for s in duplicate_sources if s)) or "<unknown>",
+            )
+
         ranked_grades = [
             _relevance_grade(r["chunk_index"], relevance_grades)
-            for r in retrieved
+            for r in deduped_retrieved
         ]
 
         # Annotate retrieved with relevance grade
-        for r, g in zip(retrieved, ranked_grades):
+        for r, g in zip(deduped_retrieved, ranked_grades):
             r["relevance_grade"] = g
 
         r1 = _recall_at_k(ranked_grades, 1, total_relevant)
@@ -263,7 +300,7 @@ class RetrievalEvaluator:
             "category": query.get("category", "unknown"),
             "text": qtext,
             "total_relevant_in_golden": total_relevant,
-            "retrieved_chunks": retrieved,
+            "retrieved_chunks": deduped_retrieved,
             "recall_at_1": r1,
             "recall_at_3": r3,
             "recall_at_5": r5,
