@@ -11,7 +11,7 @@ also a space heater that occasionally outputs a JSON file
 ![Compliance: HIPAA Aligned](https://img.shields.io/badge/Compliance-HIPAA--Aligned-green)
 ---
 
-![MARA — Active Session](docs_v2/assets/simple-ui-active-session.png)
+watch the [demo video](https://www.ronitsaxena.in/projects/clinical-trial-matching-api/) or read on for setup instructions, architecture overview, and troubleshooting tips.
 
 ## Quickstart (5 minutes)
 
