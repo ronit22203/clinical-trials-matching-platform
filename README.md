@@ -3,6 +3,8 @@
 **Local-first, open‑source clinical trial matching.**
 No API keys. No cloud. Just `git clone` + `docker-compose up`.
 
+also a space heater that occasionally outputs a JSON file
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Made with Python](https://img.shields.io/badge/Python-3.11-blue)](https://python.org)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)](https://docker.com)
@@ -40,7 +42,7 @@ make reasoning-run-query QUERY="What biomarkers predict sepsis mortality?"
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| Neo4j Browser | <http://localhost:7474> | `neo4j` / `testpassword` |
+| Neo4j Browser | <http://localhost:7474> | - |
 | Qdrant Dashboard | <http://localhost:6333/dashboard> | – |
 | Reasoning API | <http://localhost:8000> | – |
 | UI Dev Server | <http://localhost:3000> | – |
