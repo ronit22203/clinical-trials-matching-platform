@@ -13,6 +13,23 @@ also a space heater that occasionally outputs a JSON file
 
 watch the [demo video](https://www.ronitsaxena.in/projects/clinical-trial-matching-api/) or read on for setup instructions, architecture overview, and troubleshooting tips.
 
+---
+
+## What this repository is (and isn't)
+
+This is a **local-first, consolidated quickstart** — not the production codebase.
+
+The production infrastructure is intentionally split across specialized repositories. Each one is optimized for a single concern and independently deployable. This monorepo exists so that anyone can run the full end-to-end system on a laptop with a single `git clone`, without configuring cloud credentials, GPU hardware, or distributed infrastructure.
+
+| This module | Origin repo | What was simplified for local |
+|---|---|---|
+| `agentic-reasoning` | [`clinical-graphrag-agents`](https://github.com/ronit22203/clinical-graphrag-agents) | Temporal durable workflows and LangGraph routing replaced by a deterministic two-phase pipeline (ADR-008) |
+| `data-ingestion` | [`ingestion-layer-graphrag`](https://github.com/ronit22203/ingestion-layer-graphrag) | AWS GPU-accelerated OCR (g4dn/T4) swapped for local Surya (MPS/CPU) |
+| `data-acquisition` | [`aws-data-acquisition`](https://github.com/ronit22203/aws-data-acquisition) | Multi-cloud S3 → Azure fallback chain still present; S3/Azure credentials optional |
+| LLM inference | [`core-llm-inference`](https://github.com/ronit22203/core-llm-inference) | SGLang production engine (RTX 5080, continuous batching) swapped for LM Studio or Ollama locally |
+
+Architecture decisions and failure register: [`clinical-platform-manifest`](https://github.com/ronit22203/clinical-platform-manifest).
+
 ## Quickstart (5 minutes)
 
 ```bash
