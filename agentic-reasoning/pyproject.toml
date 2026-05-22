@@ -6,9 +6,13 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "click>=8.3.1",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "python-multipart>=0.0.9",
     "langchain>=1.2.10",
     "langchain-ollama>=1.0.1",
     "langchain-openai>=0.3.0",
+    "numpy>=1.24.0",
     "pydantic>=2.12.5",
     "pytest>=9.0.2",
     "pyyaml>=6.0.3",
