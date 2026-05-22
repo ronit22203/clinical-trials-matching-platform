@@ -56,6 +56,21 @@
   <!-- ── MAIN ───────────────────────────────────────────────────────────────── -->
   <main class="max-w-5xl mx-auto px-4 py-8">
 
+    <!-- Tab switcher -->
+    <div class="tab-switcher">
+      <button class="tab-btn" :class="activeTab === 'query' ? 'active' : ''" @click="activeTab = 'query'">
+        Query &amp; Retrieval
+      </button>
+      <button class="tab-btn" :class="activeTab === 'ingestion' ? 'active' : ''" @click="activeTab = 'ingestion'">
+        Ingestion Pipeline
+      </button>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════════════ -->
+    <!--  QUERY TAB (existing content)                                          -->
+    <!-- ════════════════════════════════════════════════════════════════════════ -->
+    <div x-show="activeTab === 'query'">
+
     <!-- Query panel -->
     <section class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
       <h2 class="text-slate-800 font-semibold mb-4">Clinical Query</h2>
@@ -428,7 +443,325 @@
       </details>
     </section>
 
+    </div><!-- end Query tab -->
+
+    <!-- ════════════════════════════════════════════════════════════════════════ -->
+    <!--  INGESTION TAB                                                         -->
+    <!-- ════════════════════════════════════════════════════════════════════════ -->
+    <div x-show="activeTab === 'ingestion'">
+
+      <!-- Upload + Run panel -->
+      <section class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
+        <h2 class="text-slate-800 font-semibold mb-4">Ingest a PDF</h2>
+        <p class="text-slate-500 text-sm mb-4">
+          Upload one PDF to run the 5-stage pipeline: OCR → Markdown → Clean → Chunk → Qdrant.
+          Live progress streams via SSE. Start the ingestion API first:
+          <code class="bg-slate-100 rounded px-1 py-0.5 text-xs">make ingestion-api</code>
+        </p>
+
+        <!-- Drop zone / file picker -->
+        <label class="flex items-center gap-3 cursor-pointer border-2 border-dashed border-slate-300 rounded-xl px-5 py-6 mb-4 hover:border-blue-400 hover:bg-blue-50 transition-colors"
+               :class="{ 'opacity-50 pointer-events-none': ingestState === 'running' }">
+          <svg class="w-8 h-8 text-slate-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          <div>
+            <p class="text-sm font-semibold text-slate-700"
+               x-text="ingestFile ? ingestFile.name : 'Drop PDF here or click to browse'"></p>
+            <p class="text-xs text-slate-400" x-show="!ingestFile">Accepts .pdf files</p>
+            <p class="text-xs text-green-600 font-mono" x-show="ingestFile"
+               x-text="ingestFile ? (ingestFile.size / 1024).toFixed(0) + ' KB' : ''"></p>
+          </div>
+          <input type="file" accept=".pdf" class="hidden" @change="onIngestFileChange($event)"
+                 :disabled="ingestState === 'running'" />
+        </label>
+
+        <div class="flex items-center gap-3">
+          <!-- Re-scan existing docs -->
+          <button @click="loadIngestStatus()"
+                  class="text-sm text-slate-500 border border-slate-300 rounded-lg px-4 py-2 hover:bg-slate-50 transition-colors flex items-center gap-2">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            Scan existing
+          </button>
+
+          <div class="ml-auto flex gap-3">
+            <button x-show="ingestState !== 'idle'"
+                    @click="resetIngest()"
+                    class="text-sm text-slate-500 hover:text-slate-700 transition-colors">
+              Reset
+            </button>
+            <button @click="runIngest()"
+                    :disabled="!ingestFile || ingestState === 'running'"
+                    class="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors flex items-center gap-2">
+              <div class="spinner w-4 h-4 border-2" x-show="ingestState === 'running'"
+                   style="border-color:rgba(255,255,255,0.3);border-top-color:white"></div>
+              <span x-text="ingestState === 'running' ? 'Running…' : 'Run Pipeline'"></span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Error banner -->
+      <div x-show="ingestError" class="bg-red-50 border border-red-200 rounded-xl p-4 mb-5 text-sm text-red-700">
+        <strong>Pipeline error:</strong> <span x-text="ingestError"></span>
+      </div>
+
+      <!-- Live stage progress -->
+      <section x-show="ingestState !== 'idle' || Object.values(ingestStages).some(s => s !== 'pending')"
+               class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6">
+        <h3 class="text-slate-600 text-xs font-semibold uppercase tracking-wide mb-3">Pipeline Stages</h3>
+
+        <template x-for="[stageKey, stageLabel] in ingestStageDefs" :key="stageKey">
+          <div class="ingest-stage-row mb-1" :class="ingestStages[stageKey]">
+            <div class="ingest-stage-dot">
+              <template x-if="ingestStages[stageKey] === 'running'">
+                <div class="spinner" style="width:10px;height:10px;border-width:2px;"></div>
+              </template>
+              <template x-if="ingestStages[stageKey] === 'done'">
+                <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+              </template>
+              <template x-if="ingestStages[stageKey] === 'error'">
+                <span style="font-size:0.65rem">✕</span>
+              </template>
+            </div>
+            <span x-text="stageLabel"></span>
+            <span class="ml-auto text-xs font-mono text-slate-400" x-text="ingestMessages[stageKey] || ''"></span>
+          </div>
+        </template>
+      </section>
+
+      <!-- Per-stage artifact panels (shown once stage is done) -->
+      <div class="flex flex-col gap-4">
+
+        <!-- OCR: debug viz thumbnails -->
+        <div x-show="ingestStages.ocr === 'done' && ingestSlug" class="artifact-panel">
+          <div class="artifact-panel-header" @click="togglePanel('ocr')">
+            <span>
+              <svg class="w-3.5 h-3.5 inline mr-1 text-orange-400" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"/>
+              </svg>
+              Stage 1 — OCR Debug Viz
+            </span>
+            <span class="text-slate-400 font-normal normal-case text-xs">
+              <span x-text="ingestArtifacts.ocr_pages ? ingestArtifacts.ocr_pages + ' page(s)' : ''"></span>
+              <span class="ml-2" x-text="openPanels.ocr ? '▲' : '▼'"></span>
+            </span>
+          </div>
+          <div class="artifact-panel-body ocr-page-grid" x-show="openPanels.ocr">
+            <template x-for="page in (ingestArtifacts.ocr_pages || 0)" :key="page">
+              <div class="ocr-page-thumb" @click="viewOcrPage(page)">
+                <img :src="window.API.getOcrVizUrl(ingestSlug, page)"
+                     :alt="'Page ' + page"
+                     loading="lazy"
+                     class="w-full" />
+                <div class="ocr-page-num" x-text="'p.' + page"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Convert: markdown preview -->
+        <div x-show="ingestStages.convert === 'done' && ingestSlug" class="artifact-panel">
+          <div class="artifact-panel-header" @click="togglePanel('convert'); loadArtifactIfNeeded('markdown')">
+            <span>
+              <svg class="w-3.5 h-3.5 inline mr-1 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+              Stage 2 — Converted Markdown
+            </span>
+            <span class="text-slate-400 font-normal normal-case text-xs">
+              <span x-text="ingestArtifacts.markdown ? (ingestArtifacts.markdown.chars || 0).toLocaleString() + ' chars' : ''"></span>
+              <span class="ml-2" x-text="openPanels.convert ? '▲' : '▼'"></span>
+            </span>
+          </div>
+          <div class="artifact-panel-body" x-show="openPanels.convert">
+            <pre class="snippet-pre text-xs" x-text="ingestArtifacts.markdown?.preview || 'Loading…'"></pre>
+          </div>
+        </div>
+
+        <!-- Clean: cleaned text preview -->
+        <div x-show="ingestStages.clean === 'done' && ingestSlug" class="artifact-panel">
+          <div class="artifact-panel-header" @click="togglePanel('clean'); loadArtifactIfNeeded('clean')">
+            <span>
+              <svg class="w-3.5 h-3.5 inline mr-1 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
+              </svg>
+              Stage 3 — Cleaned Text
+            </span>
+            <span class="text-slate-400 font-normal normal-case text-xs">
+              <span x-text="ingestArtifacts.clean ? (ingestArtifacts.clean.chars || 0).toLocaleString() + ' chars' : ''"></span>
+              <span class="ml-2" x-text="openPanels.clean ? '▲' : '▼'"></span>
+            </span>
+          </div>
+          <div class="artifact-panel-body" x-show="openPanels.clean">
+            <pre class="snippet-pre text-xs" x-text="ingestArtifacts.clean?.preview || 'Loading…'"></pre>
+          </div>
+        </div>
+
+        <!-- Chunk: sample cards -->
+        <div x-show="ingestStages.chunk === 'done' && ingestSlug" class="artifact-panel">
+          <div class="artifact-panel-header" @click="togglePanel('chunk'); loadArtifactIfNeeded('chunks')">
+            <span>
+              <svg class="w-3.5 h-3.5 inline mr-1 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+              </svg>
+              Stage 4 — Chunks
+            </span>
+            <span class="text-slate-400 font-normal normal-case text-xs">
+              <span x-text="ingestArtifacts.chunks ? ingestArtifacts.chunks.total_chunks + ' total' : ''"></span>
+              <span class="ml-2" x-text="openPanels.chunk ? '▲' : '▼'"></span>
+            </span>
+          </div>
+          <div class="artifact-panel-body" x-show="openPanels.chunk">
+            <template x-if="ingestArtifacts.chunks">
+              <div class="flex flex-col gap-2">
+                <template x-for="(chunk, ci) in (ingestArtifacts.chunks.sample_chunks || [])" :key="ci">
+                  <div class="chunk-chip">
+                    <div class="chunk-chip-header" x-text="(chunk.context || 'root') + ' · ' + (chunk.content?.length || 0) + ' chars'"></div>
+                    <div class="line-clamp-3 text-slate-600" x-text="chunk.content?.substring(0, 220)"></div>
+                  </div>
+                </template>
+                <p x-show="ingestArtifacts.chunks.total_chunks > 10"
+                   class="text-xs text-slate-400 text-center pt-1">
+                  … and <span x-text="ingestArtifacts.chunks.total_chunks - 10"></span> more chunks
+                </p>
+              </div>
+            </template>
+            <p x-if="!ingestArtifacts.chunks" class="text-xs text-slate-400">Loading…</p>
+          </div>
+        </div>
+
+        <!-- Vectorize: confirmation badge -->
+        <div x-show="ingestStages.vectorize === 'done'" class="artifact-panel">
+          <div class="artifact-panel-header">
+            <span>
+              <svg class="w-3.5 h-3.5 inline mr-1 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+              </svg>
+              Stage 5 — Vectorized
+            </span>
+          </div>
+          <div class="artifact-panel-body">
+            <div class="flex gap-3 flex-wrap">
+              <span class="inline-flex items-center gap-1.5 text-sm font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-2">
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                </svg>
+                Qdrant indexed
+              </span>
+              <span class="text-xs text-slate-400 self-center"
+                    x-text="ingestMessages.vectorize || ''"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- KG: D3 force graph + triplet count -->
+        <div x-show="ingestStages.kg === 'done' || ingestStages.kg === 'skipped'" class="artifact-panel">
+          <div class="artifact-panel-header" @click="togglePanel('kg'); if (ingestStages.kg === 'done' && ingestSlug && !ingestArtifacts.kgGraph) loadKgGraph()">
+            <span>
+              <svg class="w-3.5 h-3.5 inline mr-1 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              Stage 6 — Knowledge Graph
+            </span>
+            <span class="text-slate-400 font-normal normal-case text-xs flex items-center gap-2">
+              <template x-if="ingestArtifacts.kg?.triplets">
+                <span x-text="ingestArtifacts.kg.triplets + ' triplets'"></span>
+              </template>
+              <template x-if="ingestArtifacts.kgGraph?.nodes?.length">
+                <span x-text="ingestArtifacts.kgGraph.nodes.length + ' nodes · ' + ingestArtifacts.kgGraph.links.length + ' edges'"></span>
+              </template>
+              <span x-text="openPanels.kg ? '▲' : '▼'"></span>
+            </span>
+          </div>
+          <div class="artifact-panel-body" x-show="openPanels.kg">
+            <template x-if="ingestStages.kg === 'skipped'">
+              <span class="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2">
+                ⚠ KG skipped — <span x-text="ingestMessages.kg || 'Neo4j/LLM unavailable'"></span>
+              </span>
+            </template>
+            <template x-if="ingestStages.kg === 'done'">
+              <div>
+                <!-- Loading state -->
+                <p x-show="!ingestArtifacts.kgGraph" class="text-xs text-slate-400 py-2">Loading graph…</p>
+                <!-- No nodes -->
+                <p x-show="ingestArtifacts.kgGraph && ingestArtifacts.kgGraph.nodes.length === 0"
+                   class="text-xs text-slate-400 py-2">No triplets found for this document.</p>
+                <!-- Force graph canvas -->
+                <template x-if="ingestArtifacts.kgGraph?.nodes?.length > 0">
+                  <div>
+                    <p class="text-xs text-slate-400 mb-2">Scroll to zoom · drag nodes · hover for full label</p>
+                    <div style="height:420px; border-radius:8px; overflow:hidden; background:#f8fafc; border:1px solid #e2e8f0;">
+                      <svg id="ingest-kg-graph" class="w-full h-full"></svg>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </div>
+
+      </div><!-- end stage artifact panels -->
+
+      <!-- Previously ingested docs list -->
+      <section x-show="ingestDocs.length > 0" class="mt-6 bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+        <h3 class="text-slate-600 text-xs font-semibold uppercase tracking-wide mb-3">Existing Processed Docs</h3>
+        <div class="flex flex-col gap-1">
+          <template x-for="doc in ingestDocs" :key="doc.slug">
+            <div class="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
+              <span class="text-sm text-slate-700 font-mono flex-1" x-text="doc.slug"></span>
+              <template x-for="[sk, sdone] in Object.entries(doc.stages)" :key="sk">
+                <span class="text-xs px-2 py-0.5 rounded-full font-semibold"
+                      :class="sdone ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-slate-100 text-slate-400'"
+                      x-text="sk"></span>
+              </template>
+              <span class="text-xs text-slate-400" x-text="doc.ocr_pages ? doc.ocr_pages + 'p' : ''"></span>
+            </div>
+          </template>
+        </div>
+      </section>
+
+    </div><!-- end Ingestion tab -->
+
   </main>
+
+  <!-- ── OCR PAGE LIGHTBOX ──────────────────────────────────────────────────── -->
+  <div class="modal-overlay" x-show="ocrLightbox" @click.self="ocrLightbox = null">
+    <div class="modal-box" x-show="ocrLightbox" style="max-width:820px; max-height:92vh; overflow:auto;">
+      <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+        <span class="text-sm font-semibold text-slate-700"
+              x-text="ocrLightbox ? 'OCR Debug Viz — ' + ingestSlug + ' · page ' + ocrLightbox : ''"></span>
+        <div class="flex items-center gap-3">
+          <button @click="ocrLightbox = Math.max(1, ocrLightbox - 1)"
+                  :disabled="ocrLightbox <= 1"
+                  class="text-slate-400 hover:text-slate-700 disabled:opacity-30 text-sm px-2">← prev</button>
+          <button @click="ocrLightbox = Math.min(ingestArtifacts.ocr_pages, ocrLightbox + 1)"
+                  :disabled="ocrLightbox >= ingestArtifacts.ocr_pages"
+                  class="text-slate-400 hover:text-slate-700 disabled:opacity-30 text-sm px-2">next →</button>
+          <button @click="ocrLightbox = null" class="text-slate-400 hover:text-slate-600 text-2xl leading-none ml-2">×</button>
+        </div>
+      </div>
+      <div class="p-4">
+        <img x-show="ocrLightbox"
+             :src="ocrLightbox ? window.API.getOcrVizUrl(ingestSlug, ocrLightbox) : ''"
+             class="w-full rounded border border-slate-200"
+             alt="OCR debug viz" />
+        <p class="text-xs text-slate-400 mt-2 text-center">
+          Green = high confidence (≥ threshold) · Red = low confidence
+        </p>
+      </div>
+    </div>
+  </div>
 
   <!-- ── VERIFY MODAL ───────────────────────────────────────────────────────── -->
   <div class="modal-overlay" x-show="verifyData" @click.self="verifyData = null">
@@ -654,6 +987,8 @@
   <script>
     function app() {
       return {
+        // ── Query/Retrieval tab state ────────────────────────────────────────
+        activeTab: 'query',
         state: 'idle',  // idle | loading | results | error
         query: '',
         csvFile: null,
@@ -670,17 +1005,38 @@
         verifyData: null,
         debugData: {},   // keyed by match index
         errorMessage: '',
-        synthesis: null,        // { text, model, tokensUsed }
+        synthesis: null,
         synthesisLoading: false,
         synthesisCopied: false,
         synthesisTrusted: false,
 
+        // ── Ingestion tab state ──────────────────────────────────────────────
+        ingestFile: null,
+        ingestState: 'idle',        // idle | running | done | error
+        ingestStages: { ocr: 'pending', convert: 'pending', clean: 'pending', chunk: 'pending', vectorize: 'pending', kg: 'pending' },
+        ingestMessages: {},          // stage → last message string
+        ingestSlug: null,
+        ingestError: '',
+        ingestDocs: [],
+        ingestArtifacts: {},        // keyed: markdown, clean, chunks, ocr_pages, kg, kgGraph
+        openPanels: { ocr: true, convert: false, clean: false, chunk: false, kg: false },
+        ocrLightbox: null,          // page number or null
+        // Stage label pairs for the progress list
+        ingestStageDefs: [
+          ['ocr',       '1 · OCR (Surya)'],
+          ['convert',   '2 · Convert → Markdown'],
+          ['clean',     '3 · Clean & PII redact'],
+          ['chunk',     '4 · Chunk'],
+          ['vectorize', '5 · Embed → Qdrant'],
+          ['kg',        '6 · Knowledge Graph'],
+        ],
+
         async init() {
           try {
             this.stats = await window.API.getStats();
-          } catch (_) {
-            // stats are optional — don't block
-          }
+          } catch (_) {}
+          // Non-blocking status fetch for ingestion tab
+          this.loadIngestStatus().catch(() => {});
         },
 
         onCsvChange(event) {
@@ -707,11 +1063,8 @@
           this.synthesis = null;
           this.synthesisTrusted = false;
 
-          // Animate pipeline steps
           const stepInterval = setInterval(() => {
-            if (this.loadingStep < this.pipelineSteps.length - 1) {
-              this.loadingStep++;
-            }
+            if (this.loadingStep < this.pipelineSteps.length - 1) this.loadingStep++;
           }, 700);
 
           try {
@@ -719,7 +1072,6 @@
             this.results = data;
             this.loadingStep = this.pipelineSteps.length;
             this.state = 'results';
-            // Fire synthesis asynchronously — don't block result display
             this._triggerSynthesis(data);
           } catch (err) {
             this.errorMessage = err.message || 'Unknown error';
@@ -737,7 +1089,6 @@
             const res = await window.API.synthesize(data.query || this.query, evidence);
             this.synthesis = res;
           } catch (_) {
-            // Synthesis is non-critical — fail silently
             this.synthesis = null;
           } finally {
             this.synthesisLoading = false;
@@ -787,12 +1138,121 @@
             ]);
             this.debugData = { ...this.debugData, [mi]: { loading: false, heatmap, subgraph, error: null } };
             if (subgraph?.nodes?.length) {
-              // Give Alpine one tick to render the SVG element before D3 touches it
               setTimeout(() => renderSubgraph('subgraph-' + mi, subgraph), 60);
             }
           } catch (err) {
             this.debugData = { ...this.debugData, [mi]: { loading: false, heatmap: null, subgraph: null, error: err.message } };
           }
+        },
+
+        // ── Ingestion tab methods ──────────────────────────────────────────────
+
+        onIngestFileChange(event) {
+          this.ingestFile = event.target.files?.[0] || null;
+        },
+
+        resetIngest() {
+          this.ingestState = 'idle';
+          this.ingestStages = { ocr: 'pending', convert: 'pending', clean: 'pending', chunk: 'pending', vectorize: 'pending', kg: 'pending' };
+          this.ingestMessages = {};
+          this.ingestSlug = null;
+          this.ingestError = '';
+          this.ingestArtifacts = {};
+          this.openPanels = { ocr: true, convert: false, clean: false, chunk: false, kg: false };
+          this.ocrLightbox = null;
+        },
+
+        async loadIngestStatus() {
+          const { docs } = await window.API.getIngestStatus();
+          this.ingestDocs = docs || [];
+        },
+
+        async runIngest() {
+          if (!this.ingestFile || this.ingestState === 'running') return;
+          this.resetIngest();
+          this.ingestState = 'running';
+
+          try {
+            await window.API.ingestPdf(this.ingestFile, (event) => {
+              const { stage, status, message, extra } = event;
+
+              // Terminal sentinel: pipeline-level error or final done
+              if (stage === 'error') {
+                this.ingestError = message || 'Pipeline error';
+                this.ingestState = 'error';
+                return;
+              }
+              if (stage === 'done') {
+                this.ingestState = 'done';
+                this.loadIngestStatus().catch(() => {});
+                return;
+              }
+              if (stage in this.ingestStages) {
+                this.ingestStages = { ...this.ingestStages, [stage]: status };
+                this.ingestMessages = { ...this.ingestMessages, [stage]: message };
+              }
+
+              // Capture slug and artifact metadata from extra payload
+              if (extra?.slug) this.ingestSlug = extra.slug;
+              if (stage === 'ocr' && status === 'done' && extra?.pages) {
+                this.ingestArtifacts = { ...this.ingestArtifacts, ocr_pages: extra.pages };
+              }
+              if (stage === 'convert' && status === 'done' && extra?.chars) {
+                this.ingestArtifacts = { ...this.ingestArtifacts, markdown: { chars: extra.chars } };
+              }
+              if (stage === 'clean' && status === 'done' && extra?.chars) {
+                this.ingestArtifacts = { ...this.ingestArtifacts, clean: { chars: extra.chars } };
+              }
+              if (stage === 'chunk' && status === 'done' && extra?.total_chunks !== undefined) {
+                this.ingestArtifacts = {
+                  ...this.ingestArtifacts,
+                  chunks: { total_chunks: extra.total_chunks, sample_chunks: [] },
+                };
+              }
+              if (stage === 'kg' && (status === 'done' || status === 'skipped') && extra?.triplets !== undefined) {
+                this.ingestArtifacts = { ...this.ingestArtifacts, kg: { triplets: extra.triplets } };
+              }
+              // Auto-load the KG force graph when KG stage finishes
+              if (stage === 'kg' && status === 'done' && this.ingestSlug) {
+                this.openPanels = { ...this.openPanels, kg: true };
+                this.loadKgGraph().catch(() => {});
+              }
+            });
+          } catch (err) {
+            this.ingestError = err.message || 'Failed to connect to ingestion API — is `make ingestion-api` running?';
+            this.ingestState = 'error';
+          }
+        },
+
+        togglePanel(name) {
+          this.openPanels = { ...this.openPanels, [name]: !this.openPanels[name] };
+        },
+
+        viewOcrPage(page) {
+          this.ocrLightbox = page;
+        },
+
+        async loadArtifactIfNeeded(stage) {
+          if (!this.ingestSlug) return;
+          // 'markdown', 'clean', 'chunks'
+          if (this.ingestArtifacts[stage]?.preview || this.ingestArtifacts[stage]?.sample_chunks) return;
+          try {
+            const data = await window.API.getArtifact(stage, this.ingestSlug);
+            this.ingestArtifacts = { ...this.ingestArtifacts, [stage]: data };
+          } catch (_) { /* non-critical */ }
+        },
+
+        async loadKgGraph() {
+          if (!this.ingestSlug) return;
+          try {
+            const data = await window.API.getKgGraph(this.ingestSlug);
+            this.ingestArtifacts = { ...this.ingestArtifacts, kgGraph: data };
+            if (data.nodes?.length > 0) {
+              // Wait for Alpine to render the SVG element, then draw
+              await this.$nextTick();
+              setTimeout(() => renderSubgraph('ingest-kg-graph', data), 80);
+            }
+          } catch (_) { /* non-critical */ }
         },
       };
     }

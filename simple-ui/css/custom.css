@@ -327,3 +327,159 @@
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* ── Tab switcher ────────────────────────────────────────────────────────────── */
+.tab-switcher {
+  display: flex;
+  gap: 4px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 20px;
+  width: fit-content;
+}
+
+.tab-btn {
+  padding: 6px 18px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  transition: all 0.15s;
+}
+
+.tab-btn:hover {
+  color: #334155;
+  background: rgba(255,255,255,0.6);
+}
+
+.tab-btn.active {
+  background: white;
+  color: #1e40af;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+
+/* ── Ingestion stage row ─────────────────────────────────────────────────────── */
+.ingest-stage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  border: 1px solid transparent;
+  transition: all 0.25s;
+}
+
+.ingest-stage-row.pending  { color: #94a3b8; }
+.ingest-stage-row.running  { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; font-weight: 600; }
+.ingest-stage-row.done     { color: #15803d; }
+.ingest-stage-row.error    { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+
+.ingest-stage-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+}
+
+.ingest-stage-row.pending  .ingest-stage-dot { border: 2px solid #cbd5e1; }
+.ingest-stage-row.running  .ingest-stage-dot { border: 2px solid #3b82f6; animation: pulse-ring 1s infinite; }
+.ingest-stage-row.done     .ingest-stage-dot { background: #16a34a; color: white; }
+.ingest-stage-row.error    .ingest-stage-dot { background: #dc2626; color: white; }
+
+/* ── Ingestion artifact panels ───────────────────────────────────────────────── */
+.artifact-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.artifact-panel-header {
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 8px 14px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+}
+
+.artifact-panel-header:hover { background: #f1f5f9; }
+
+.artifact-panel-body {
+  padding: 12px 14px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+/* ── OCR page grid ───────────────────────────────────────────────────────────── */
+.ocr-page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.ocr-page-thumb {
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+
+.ocr-page-thumb:hover {
+  box-shadow: 0 2px 8px rgba(59,130,246,0.2);
+  border-color: #93c5fd;
+}
+
+.ocr-page-thumb img {
+  width: 100%;
+  display: block;
+}
+
+.ocr-page-num {
+  background: #f8fafc;
+  border-top: 1px solid #e5e7eb;
+  padding: 2px 6px;
+  font-size: 0.68rem;
+  color: #94a3b8;
+  text-align: center;
+  font-family: ui-monospace, monospace;
+}
+
+/* ── Chunk sample chips ──────────────────────────────────────────────────────── */
+.chunk-chip {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.chunk-chip-header {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  font-family: ui-monospace, monospace;
+}
