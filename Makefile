@@ -12,13 +12,11 @@ NC     := \033[0m
 REASONING_DIR := agentic-reasoning
 ACQUISITION_DIR := data-acquisition
 INGESTION_DIR := data-ingestion
-UI_DIR := platform-ui
 BENCHMARKING_DIR := benchmarking
 CONFIG_FILE := config/app.yaml
 
 REASONING_PYTHON := .venv/bin/python
 ACQUISITION_PYTHON := .venv/bin/python
-UI_PACKAGE_MANAGER ?= npm
 
 SOURCE ?= medrxiv
 MAX_PDFS ?= 2
@@ -27,8 +25,6 @@ QUERY ?= What is the latest evidence for adjuvant immunotherapy in melanoma?
 SEARCH_QUERY ?= cancer immunotherapy
 RECORD_ID ?=
 PDF_TYPE ?= paper
-AGENT ?= assistant
-SGLANG_AGENT ?= sglang_assistant
 SKIP ?=
 DOC ?=
 EXEC1 ?=
@@ -57,19 +53,19 @@ DET_RUN_DIR    := $(BENCHMARKING_DIR)/results/$(DET_RUN_ID)
 FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py,$(SOURCE).py)
 
 .PHONY: help \
-	bootstrap validate up down serve serve-api serve-ui fetch ingest \
+	bootstrap validate up down serve fetch ingest \
 	status benchmark-sepsis \
 	benchmark-all benchmark-retrieval benchmark-extraction benchmark-inference benchmark-reasoning benchmark-report \
 	deterministic-run _det-ingest-timed _det-graph-timed _det-finalize \
 	clean clean-all clean-artifacts clean-ocr clean-md clean-chunks clean-vectors clean-graph clean-hard \
-	ui-install ui-dev ui-build ui-start \
-	reasoning-install reasoning-clean reasoning-test reasoning-run reasoning-run-query \
+	dev \
+	reasoning-install reasoning-clean reasoning-test reasoning-run reasoning-run-query reasoning-serve \
 	reasoning-graphrag-up reasoning-graphrag-down \
 	reasoning-download-models reasoning-sglang-run reasoning-sglang-run-query \
 	simple-ui-serve \
 	acquisition-install acquisition-test acquisition-fetch acquisition-source-validate \
 	acquisition-source-search acquisition-source-fetch \
-	ingestion-install ingestion-test ingestion-test-processors ingestion-test-embedder \
+	ingestion-install ingestion-api ingestion-test ingestion-test-processors ingestion-test-embedder \
 	ingestion-test-qdrant ingestion-run ingestion-inspect ingestion-qdrant-up \
 	ingestion-qdrant-down ingestion-qdrant-logs ingestion-qdrant-clear ingestion-qdrant-delete \
 	ingestion-neo4j-build ingestion-neo4j-delete ingestion-neo4j-stats \
@@ -132,25 +128,17 @@ down: ## Stop shared infrastructure and API/UI services
 serve: ## Start the reasoning agent in interactive CLI mode
 	@$(MAKE) --no-print-directory reasoning-run
 
-serve-api: ## Print usage — no HTTP server; use reasoning-run-query
-	@printf "$(YELLOW)No HTTP API server in this build.$(NC)\n"
-	@printf "  Single query:    $(CYAN)make reasoning-run-query QUERY=\"...\"$(NC)\n"
-	@printf "  Interactive CLI: $(CYAN)make reasoning-run$(NC)\n"
-
-serve-ui: ## Print usage — platform-ui not present in this build
-	@printf "$(YELLOW)platform-ui is not installed in this build.$(NC)\n"
-
-ui-install: ## platform-ui not present
-	@printf "$(YELLOW)platform-ui is not installed in this build.$(NC)\n"
-
-ui-dev: ## platform-ui not present
-	@printf "$(YELLOW)platform-ui is not installed in this build.$(NC)\n"
-
-ui-build: ## platform-ui not present
-	@printf "$(YELLOW)platform-ui is not installed in this build.$(NC)\n"
-
-ui-start: ## platform-ui not present
-	@printf "$(YELLOW)platform-ui is not installed in this build.$(NC)\n"
+dev: ## ★ Start all services: reasoning API (:8000), ingestion API (:8001), simple-ui (:3000)
+	@printf "$(BOLD)$(GREEN)Starting all services…$(NC)\n"
+	@printf "  Reasoning API  → $(CYAN)http://localhost:8000$(NC)\n"
+	@printf "  Ingestion API  → $(CYAN)http://localhost:8001$(NC)\n"
+	@printf "  Simple UI      → $(CYAN)http://localhost:3000$(NC)\n\n"
+	@printf "  Press $(BOLD)Ctrl+C$(NC) to stop all services.\n\n"
+	@trap 'kill 0' INT; \
+	 (cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --port 8000 --reload 2>&1 | sed 's/^/[reasoning] /') & \
+	 (cd $(INGESTION_DIR) && python3 -m uvicorn src.api.server:app --port 8001 --reload 2>&1 | sed 's/^/[ingestion] /') & \
+	 (python3 -m http.server 3000 --directory simple-ui 2>&1 | sed 's/^/[ui]        /') & \
+	 wait
 
 fetch: acquisition-fetch ## Fetch PDFs via data-acquisition
 
@@ -387,6 +375,12 @@ reasoning-run: ## Start the reasoning CLI in interactive mode
 reasoning-run-query: ## Run one reasoning query (QUERY=...)
 	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src query "$(QUERY)"
 
+reasoning-serve: ## Start reasoning HTTP API server on :8000
+	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --port 8000 --reload
+
+simple-ui-serve: ## Serve the simple-ui on :3000
+	@python3 -m http.server 3000 --directory simple-ui
+
 reasoning-graphrag-up: ## Start GraphRAG backing services (Qdrant + Neo4j)
 	@cd $(REASONING_DIR) && docker compose -p clinical_agents -f infra/docker-compose.graphrag.yml up -d
 
@@ -426,6 +420,9 @@ acquisition-source-fetch: ## Fetch a specific source record (SOURCE=<name> RECOR
 
 ingestion-install: ## Install ingestion dependencies
 	@cd $(INGESTION_DIR) && python3 -m pip install -r requirements.txt
+
+ingestion-api: ## Start ingestion pipeline API server on :8001
+	@cd $(INGESTION_DIR) && python3 -m uvicorn src.api.server:app --port 8001 --reload
 
 ingestion-test: ## Run all ingestion tests
 	@cd $(INGESTION_DIR) && python3 -m pytest tests/ -v
@@ -500,4 +497,4 @@ ingestion-clean: ## Remove ingestion caches and logs
 
 ingestion-clean-all: ingestion-clean ## Remove all ingestion data outputs
 	@rm -rf data/artifacts/extract data/artifacts/convert data/artifacts/clean \
-		data/artifacts/chunk 2>/dev/null || true
+		data/artifacts/chunk data/artifacts/highlight_cache 2>/dev/null || true
