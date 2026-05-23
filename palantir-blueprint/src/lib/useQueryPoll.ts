@@ -1,11 +1,11 @@
-// React hook: submits a query, polls for results, and fetches the knowledge graph.
+// React hook: submits a query to /api/match (synchronous) and builds KG from response.
 
 import { useCallback, useRef, useState } from "react";
-import { submitQuery, fetchQueryResults, fetchKnowledgeGraph } from "./api";
-import { adaptResult, adaptGraphNode, adaptGraphEdge } from "./adapters";
+import { matchQuery, fetchSubgraph } from "./api";
+import { adaptResult, adaptGraphFromMatch, adaptSubgraphNode, adaptSubgraphLink } from "./adapters";
 import type { TrialResult, GraphNode, GraphEdge } from "./adapters";
 
-type QueryState = "idle" | "loading" | "results" | "error" | "empty";
+export type QueryState = "idle" | "loading" | "results" | "error" | "empty";
 
 interface QueryMeta {
   latencyMs: number;
@@ -26,11 +26,7 @@ interface UseQueryPollResult {
 
 interface RunQueryOptions {
   topK?: number;
-  filters?: { condition?: string; phase?: string; status?: string };
 }
-
-const POLL_INTERVAL_MS = 1000;
-const POLL_TIMEOUT_MS = 30_000;
 
 export function useQueryPoll(): UseQueryPollResult {
   const [queryState, setQueryState] = useState<QueryState>("idle");
@@ -39,95 +35,70 @@ export function useQueryPoll(): UseQueryPollResult {
   const [meta, setMeta] = useState<QueryMeta | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startRef = useRef<number>(0);
+  // Abort controller so a new query can cancel an in-flight one
+  const abortRef = useRef<AbortController | null>(null);
 
-  function clearPoll() {
-    if (pollRef.current !== null) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }
+  const runQuery = useCallback(async (query: string, options: RunQueryOptions = {}) => {
+    abortRef.current?.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
 
-  const runQuery = useCallback(
-    async (query: string, options: RunQueryOptions = {}) => {
-      clearPoll();
-      setQueryState("loading");
-      setResults([]);
-      setGraph(null);
-      setMeta(null);
-      setErrorMsg(null);
+    setQueryState("loading");
+    setResults([]);
+    setGraph(null);
+    setMeta(null);
+    setErrorMsg(null);
 
-      let queryId: string;
-      const t0 = Date.now();
-      startRef.current = t0;
+    try {
+      const res = await matchQuery(query, options.topK ?? 10);
 
-      try {
-        const submitted = await submitQuery(query, { topK: options.topK ?? 10, filters: options.filters });
-        queryId = submitted.query_id;
-      } catch (err) {
-        setQueryState("error");
-        setErrorMsg(err instanceof Error ? err.message : String(err));
+      if (abort.signal.aborted) return;
+
+      if (!res.found || res.matches.length === 0) {
+        setQueryState("empty");
+        setMeta({ latencyMs: res.latency_ms, indexVersion: "live", strategy: "GraphRAG", totalHits: 0 });
         return;
       }
 
-      pollRef.current = setInterval(async () => {
-        const elapsed = Date.now() - startRef.current;
-        if (elapsed > POLL_TIMEOUT_MS) {
-          clearPoll();
-          setQueryState("error");
-          setErrorMsg("Query timed out after 30 seconds.");
-          return;
-        }
+      const adapted = res.matches.map(adaptResult);
+      setResults(adapted);
+      setMeta({
+        latencyMs: res.latency_ms,
+        indexVersion: "live",
+        strategy: "GraphRAG + Dense",
+        totalHits: adapted.length,
+      });
+      setQueryState("results");
 
-        try {
-          const res = await fetchQueryResults(queryId);
+      // Build KG immediately from inline evidence — no extra API call required
+      const inlineGraph = adaptGraphFromMatch(res.graphFacts, res.matches);
+      if (inlineGraph.nodes.length > 0) {
+        setGraph(inlineGraph);
+      }
 
-          if (res.status === "failed") {
-            clearPoll();
-            setQueryState("error");
-            setErrorMsg(res.error ?? "Query failed.");
-            return;
-          }
-
-          if (res.status === "completed" && res.results !== null) {
-            clearPoll();
-
-            const latencyMs = Date.now() - t0;
-            const adapted = res.results.map(adaptResult);
-
-            setResults(adapted);
-            setMeta({
-              latencyMs,
-              indexVersion: "live",
-              strategy: adapted[0]?.strategy ?? "N/A",
-              totalHits: adapted.length,
-            });
-            setQueryState(adapted.length > 0 ? "results" : "empty");
-
-            // Fetch KG in background — non-blocking
-            fetchKnowledgeGraph(queryId)
-              .then((kg) => {
-                const nodes = kg.nodes.map((n, i) => adaptGraphNode(n, i, kg.nodes.length));
-                const edges = kg.edges.map(adaptGraphEdge);
-                setGraph({ nodes, edges });
-              })
-              .catch(() => {
-                // KG failure is non-fatal — leave graph as null
-              });
-          }
-        } catch (err) {
-          clearPoll();
-          setQueryState("error");
-          setErrorMsg(err instanceof Error ? err.message : String(err));
-        }
-      }, POLL_INTERVAL_MS);
-    },
-    []
-  );
+      // Optionally enrich with Neo4j subgraph for the most prominent entity
+      const topEntity = res.matches[0]?.evidence[0]?.head;
+      if (topEntity && !abort.signal.aborted) {
+        fetchSubgraph(topEntity)
+          .then((sub) => {
+            if (abort.signal.aborted || sub.nodes.length === 0) return;
+            const nodes = sub.nodes.map((n, i) => adaptSubgraphNode(n, i, sub.nodes.length));
+            const edges = sub.links.map(adaptSubgraphLink);
+            setGraph({ nodes, edges });
+          })
+          .catch(() => {
+            // Neo4j subgraph is non-fatal — inline KG already shown
+          });
+      }
+    } catch (err) {
+      if (abort.signal.aborted) return;
+      setQueryState("error");
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
 
   function resetQuery() {
-    clearPoll();
+    abortRef.current?.abort();
     setQueryState("idle");
     setResults([]);
     setGraph(null);

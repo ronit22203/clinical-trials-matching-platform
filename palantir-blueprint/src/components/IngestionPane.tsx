@@ -15,14 +15,13 @@ import {
   Spinner,
   Tag,
 } from "@blueprintjs/core";
-import { startIngestStream, fetchOCRDebug, fetchChunks, fetchMarkdown } from "../lib/api";
-import { adaptOcrBoxes, adaptOcrHeatmap, adaptChunk } from "../lib/adapters";
-import type { OcrBox, UIChunk } from "../lib/adapters";
+import { startIngestStream, fetchChunks, fetchMarkdownArtifact, fetchCleanArtifact, getOcrVizUrl } from "../lib/api";
+import { adaptChunk } from "../lib/adapters";
+import type { UIChunk } from "../lib/adapters";
 
 // ─── Types ────────────────────────────────────────────────────
 
 type StepStatus = "idle" | "active" | "done" | "failed";
-type OcrMode = "boxes" | "heatmap";
 type MarkdownView = "output" | "diff";
 
 interface PipelineStep {
@@ -55,131 +54,31 @@ const ENTITY_COLORS: Record<ChunkEntity["type"], { bg: string; text: string }> =
   protocol:    { bg: "rgba(38,139,210,0.12)",  text: "#1a6fa8" },
 };
 
-// ─── Helpers ──────────────────────────────────────────────────
-
-function confToColor(conf: string | number): string {
-  const v = typeof conf === "number" ? conf : conf === "high" ? 0.95 : conf === "medium" ? 0.72 : 0.42;
-  if (v >= 0.85) return "#2aa198";
-  if (v >= 0.65) return "#b58900";
-  return "#cb4b16";
-}
-
-function heatmapCellColor(v: number): string {
-  // cyan (high) → amber (mid) → orange (low)
-  if (v >= 0.85) return `rgba(42, 161, 152, ${0.12 + (v - 0.85) * 0.6})`;
-  if (v >= 0.65) return `rgba(181, 137, 0,  ${0.12 + (0.85 - v) * 0.5})`;
-  return `rgba(203, 75, 22, ${0.15 + (0.65 - v) * 0.6})`;
-}
-
 // ─── Sub-components ───────────────────────────────────────────
 
 function OcrDebugViz({
-  mode,
-  boxes,
-  heatmap,
+  vizUrl,
 }: {
-  mode: OcrMode;
-  boxes: OcrBox[];
-  heatmap: number[][];
+  vizUrl: string | null;
 }) {
-  if (boxes.length === 0 && mode === "boxes") {
+  if (!vizUrl) {
     return (
       <Card elevation={Elevation.ONE} style={{ height: 175, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--surface-2)", borderRadius: 6 }}>
-        <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>OCR data available after ingestion completes</span>
-      </Card>
-    );
-  }
-  if (heatmap.length === 0 && mode === "heatmap") {
-    return (
-      <Card elevation={Elevation.ONE} style={{ height: 175, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--surface-2)", borderRadius: 6 }}>
-        <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>Heatmap available after ingestion completes</span>
+        <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>OCR debug visualization available after ingestion completes</span>
       </Card>
     );
   }
   return (
     <Card
       elevation={Elevation.ONE}
-      style={{ position: "relative", height: 175, overflow: "hidden", background: "var(--surface-2)", borderRadius: 6 }}
+      style={{ height: 175, overflow: "hidden", background: "var(--surface-2)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}
     >
-      {/* Page line grid */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: "repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(255,255,255,0.03) 20px)",
-          pointerEvents: "none",
-        }}
+      <img
+        src={vizUrl}
+        alt="OCR debug visualization — bounding boxes overlaid on page"
+        style={{ maxHeight: 175, maxWidth: "100%", objectFit: "contain" }}
+        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
       />
-
-      {mode === "boxes" && (
-        <>
-          {boxes.map((box, i) => {
-            const color = confToColor(box.conf);
-            return (
-              <div
-                key={i}
-                style={{
-                  position: "absolute",
-                  top: box.top, left: box.left,
-                  width: box.width, height: box.height,
-                  border: `1px solid ${color}`,
-                  borderRadius: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  paddingLeft: 3,
-                  background: `${color}0d`,
-                }}
-              >
-                <span style={{ fontSize: 8.5, color, whiteSpace: "nowrap", fontFamily: "monospace" }}>
-                  {box.label}
-                </span>
-              </div>
-            );
-          })}
-          <div style={{ position: "absolute", bottom: 5, right: 6, display: "flex", gap: 5 }}>
-            {[["#2aa198", "high"], ["#b58900", "mid"], ["#cb4b16", "low"]].map(([col, label]) => (
-              <span key={label} style={{ fontFamily: "monospace", fontSize: 9, color: col }}>
-                ■ {label}
-              </span>
-            ))}
-          </div>
-        </>
-      )}
-
-      {mode === "heatmap" && (
-        <>
-          {heatmap.map((row, ri) =>
-            row.map((val, ci) => (
-              <div
-                key={`${ri}-${ci}`}
-                style={{
-                  position: "absolute",
-                  top:  4 + ri * 18.5,
-                  left: 4 + ci * 74,
-                  width: 70,
-                  height: 16,
-                  background: heatmapCellColor(val),
-                  borderRadius: 1,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <span style={{ fontFamily: "monospace", fontSize: 8, color: "rgba(255,255,255,0.55)" }}>
-                  {val.toFixed(2)}
-                </span>
-              </div>
-            ))
-          )}
-          <div style={{ position: "absolute", bottom: 5, right: 6, display: "flex", gap: 5 }}>
-            {[["rgba(61,220,151,0.5)", "≥0.85"], ["rgba(196,154,60,0.5)", "0.65–0.84"], ["rgba(255,107,107,0.5)", "<0.65"]].map(([col, label]) => (
-              <span key={label} style={{ fontFamily: "monospace", fontSize: 9, color: "var(--text-dim)" }}>
-                <span style={{ background: col, padding: "0 3px", borderRadius: 1 }}>{label}</span>
-              </span>
-            ))}
-          </div>
-        </>
-      )}
     </Card>
   );
 }
@@ -326,14 +225,12 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
   const [steps, setSteps]                 = useState<PipelineStep[]>(INITIAL_STEPS);
   const [logLines, setLogLines]           = useState<string[]>([]);
   const [done, setDone]                   = useState(false);
-  const [ocrMode, setOcrMode]             = useState<OcrMode>("boxes");
   const [mdView, setMdView]               = useState<MarkdownView>("output");
   const [showDebug, setShowDebug]         = useState(false);
   const [showLog, setShowLog]             = useState(false);
   const [selectedFile, setSelectedFile]   = useState<File | null>(null);
   const [jobId, setJobId]                 = useState<string | null>(null);
-  const [ocrBoxes, setOcrBoxes]           = useState<OcrBox[]>([]);
-  const [heatmapGrid, setHeatmapGrid]     = useState<number[][]>([]);
+  const [ocrVizUrl, setOcrVizUrl]         = useState<string | null>(null);
   const [liveChunks, setLiveChunks]       = useState<Chunk[]>([]);
   const [cleanedMarkdown, setCleanedMarkdown] = useState<string>("");
   const [rawOcrText, setRawOcrText]       = useState<string>("");
@@ -347,9 +244,9 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
-  // Backend step name → UI step index (4 UI slots, 5 backend stages)
+  // Backend step name → UI step index (4 UI slots, 5+ backend stages)
   const STEP_MAP: Record<string, number> = {
-    ocr: 0, chunk: 1, convert: 2, clean: 2, vectorize: 3,
+    ocr: 0, chunk: 1, convert: 2, clean: 2, vectorize: 3, kg: 3,
   };
 
   function setStep(i: number, patch: Partial<PipelineStep>) {
@@ -360,23 +257,24 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     setLogLines((prev) => [...prev, line]);
   }
 
-  async function fetchPostRunData(id: string) {
-    // Parallel fetch OCR debug + chunks + markdown after pipeline completes
-    const [ocrResult, chunksResult, markdownResult] = await Promise.allSettled([
-      fetchOCRDebug(id),
-      fetchChunks(id),
-      fetchMarkdown(id),
+  async function fetchPostRunData(slug: string) {
+    // Set OCR viz image URL immediately (PNG served by ingestion API, page 1)
+    setOcrVizUrl(getOcrVizUrl(slug, 1));
+
+    // Parallel fetch chunks + raw markdown + cleaned markdown
+    const [chunksResult, rawResult, cleanResult] = await Promise.allSettled([
+      fetchChunks(slug),
+      fetchMarkdownArtifact(slug),
+      fetchCleanArtifact(slug),
     ]);
-    if (ocrResult.status === "fulfilled" && ocrResult.value.pages.length > 0) {
-      setOcrBoxes(adaptOcrBoxes(ocrResult.value.pages[0]));
-      setHeatmapGrid(adaptOcrHeatmap(ocrResult.value.pages[0]));
-    }
     if (chunksResult.status === "fulfilled") {
-      setLiveChunks(chunksResult.value.chunks.map(adaptChunk));
+      setLiveChunks(chunksResult.value.sample_chunks.map(adaptChunk));
     }
-    if (markdownResult.status === "fulfilled") {
-      setCleanedMarkdown(markdownResult.value.markdown);
-      setRawOcrText(markdownResult.value.cleaning_log.join("\n"));
+    if (rawResult.status === "fulfilled") {
+      setRawOcrText(rawResult.value.preview);
+    }
+    if (cleanResult.status === "fulfilled") {
+      setCleanedMarkdown(cleanResult.value.preview);
     }
   }
 
@@ -387,8 +285,7 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     setDone(false);
     setLogLines([]);
     setJobId(null);
-    setOcrBoxes([]);
-    setHeatmapGrid([]);
+    setOcrVizUrl(null);
     setLiveChunks([]);
     setCleanedMarkdown("");
     setRawOcrText("");
@@ -416,7 +313,9 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     readerRef.current = reader;
     const decoder = new TextDecoder();
     let buffer = "";
-    let currentEvent = "";
+
+    // Extract slug from X-Slug response header (set by the ingestion API)
+    const slug = response.headers.get("X-Slug") ?? "";
 
     try {
       while (true) {
@@ -428,48 +327,54 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
         buffer = lines.pop() ?? "";
 
         for (const line of lines) {
-          if (line.startsWith("event:")) {
-            currentEvent = line.slice(6).trim();
-          } else if (line.startsWith("data:")) {
-            const raw = line.slice(5).trim();
-            if (!raw) continue;
-            let parsed: Record<string, unknown>;
-            try { parsed = JSON.parse(raw); } catch { continue; }
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw || raw === "end") continue;
+          let parsed: Record<string, unknown>;
+          try { parsed = JSON.parse(raw); } catch { continue; }
 
-            addLogLine(`[${currentEvent}] ${JSON.stringify(parsed)}`);
+          const stage  = (parsed.stage  ?? "") as string;
+          const status = (parsed.status ?? "") as string;
+          const msg    = (parsed.message ?? "") as string;
+          const extra  = (parsed.extra ?? {}) as Record<string, unknown>;
 
-            if (currentEvent === "progress") {
-              const stepName = (parsed.step ?? "") as string;
-              const uiIdx = STEP_MAP[stepName] ?? -1;
-              if (uiIdx >= 0) {
-                const progress = typeof parsed.progress === "number" ? parsed.progress : 0;
-                const prevStatus = steps[uiIdx]?.status;
-                const newStatus: StepStatus = progress >= 1 ? "done" : "active";
-                // Activate the next step if this one just completed
-                if (newStatus === "done" && prevStatus !== "done") {
-                  setStep(uiIdx, { status: "done", progress: 1 });
-                  const nextIdx = uiIdx + 1;
-                  if (nextIdx < INITIAL_STEPS.length) {
-                    setStep(nextIdx, { status: "active", progress: 0.1 });
-                  }
-                } else {
-                  setStep(uiIdx, { status: newStatus, progress });
-                }
+          addLogLine(`[${stage}:${status}] ${msg}`);
+
+          // Capture slug from event if not in header
+          const eventSlug = (extra.slug ?? slug) as string;
+
+          if (stage === "done") {
+            // Terminal success: mark all steps done
+            setSteps(INITIAL_STEPS.map((s) => ({ ...s, status: "done", progress: 1 })));
+            setRunning(false);
+            setDone(true);
+            if (eventSlug) {
+              setJobId(eventSlug);
+              fetchPostRunData(eventSlug);
+            }
+            return;
+          }
+
+          if (stage === "error") {
+            const uiIdx = STEP_MAP[extra.stage as string] ?? STEP_MAP[stage] ?? 0;
+            setStep(uiIdx, { status: "failed", errorMsg: msg });
+            setRunning(false);
+            return;
+          }
+
+          const uiIdx = STEP_MAP[stage];
+          if (uiIdx !== undefined) {
+            if (status === "done") {
+              setStep(uiIdx, { status: "done", progress: 1 });
+              // Activate next step
+              const nextIdx = uiIdx + 1;
+              if (nextIdx < INITIAL_STEPS.length) {
+                setStep(nextIdx, { status: "active", progress: 0.1 });
               }
-            } else if (currentEvent === "error") {
-              const msg = (parsed.message ?? "Unknown error") as string;
-              const stepName = (parsed.step ?? "") as string;
-              const uiIdx = STEP_MAP[stepName] ?? 0;
-              setStep(uiIdx, { status: "failed", errorMsg: msg });
-              setRunning(false);
-              return;
-            } else if (currentEvent === "complete") {
-              const id = (parsed.job_id ?? parsed.jobId ?? "") as string;
-              setSteps(INITIAL_STEPS.map((s) => ({ ...s, status: "done", progress: 1 })));
-              setRunning(false);
-              setDone(true);
-              setJobId(id);
-              if (id) fetchPostRunData(id);
+            } else if (status === "running") {
+              setStep(uiIdx, { status: "active", progress: 0.5 });
+            } else if (status === "skipped") {
+              setStep(uiIdx, { status: "done", progress: 1 });
             }
           }
         }
@@ -486,8 +391,7 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     setDone(false);
     setLogLines([]);
     setJobId(null);
-    setOcrBoxes([]);
-    setHeatmapGrid([]);
+    setOcrVizUrl(null);
     setLiveChunks([]);
     setCleanedMarkdown("");
     setRawOcrText("");
@@ -675,31 +579,11 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
               <H5 style={{ margin: 0, fontFamily: "var(--text-mono)", fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase" }}>
                 OCR Debug Visualization
               </H5>
-              <div style={{ display: "flex", gap: 1 }}>
-                {(["boxes", "heatmap"] as OcrMode[]).map((m) => (
-                  <Button
-                    key={m}
-                    small
-                    minimal={ocrMode !== m}
-                    active={ocrMode === m}
-                    intent={ocrMode === m ? Intent.PRIMARY : Intent.NONE}
-                    text={m.toUpperCase()}
-                    onClick={() => setOcrMode(m)}
-                    style={{ fontFamily: "var(--text-mono)", fontSize: 9, letterSpacing: "0.06em" }}
-                  />
-                ))}
-              </div>
             </div>
-            <OcrDebugViz mode={ocrMode} boxes={ocrBoxes} heatmap={heatmapGrid} />
-            {ocrMode === "boxes" && ocrBoxes.length > 0 && (
+            <OcrDebugViz vizUrl={ocrVizUrl} />
+            {ocrVizUrl && (
               <div style={{ marginTop: 6, fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
-                {ocrBoxes.filter((b) => b.conf === "low").length} low-confidence words flagged ·{" "}
-                {ocrBoxes.filter((b) => b.conf === "medium").length} medium
-              </div>
-            )}
-            {ocrMode === "heatmap" && (
-              <div style={{ marginTop: 6, fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
-                grid: 6 × 9 confidence cells · page 4 of 5
+                Surya OCR bounding-box overlay — page 1
               </div>
             )}
           </div>

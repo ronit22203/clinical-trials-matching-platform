@@ -1,86 +1,64 @@
 // Typed fetch wrappers for the clinical ops backend API.
 // All functions throw on non-2xx responses.
 
+// Reasoning API (query, match, KG)
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
+// Ingestion API (ingest, artifacts)
+const INGEST_BASE = (import.meta.env.VITE_INGEST_API_BASE_URL as string | undefined) ?? "http://localhost:8001";
 
-// ─── Shared backend types ──────────────────────────────────────
+// ─── Backend types — reasoning API (/api/match) ────────────────
 
-export interface BackendProvenance {
-  source_document: string;
-  byte_range: [number, number];
-  highlighted_text: string;
-  confidence_score: number;
+/** One evidence triplet attached to a match chunk. */
+export interface BackendMatchEvidence {
+  head: string;
+  relation: string;
+  tail: string;
+  tier: number;
+  source: string;
+  byteStart: number;
+  byteEnd: number;
 }
 
-export interface BackendResult {
-  id: string;
-  trial_id: string;
-  title: string;
-  snippet: string;
-  relevance_score: number;
-  provenance: BackendProvenance[];
-  matched_criteria: string[];
-  // Optional enrichment fields the backend may include in metadata
-  metadata?: {
-    phase?: string;
-    sponsor?: string;
-    enrollment_status?: string;
-    strategy?: string;
-    page_number?: number;
-    token_count?: number;
-    [key: string]: unknown;
-  };
+/** A single retrieved chunk from POST /api/match. */
+export interface BackendMatch {
+  chunkIndex: number;
+  score: number;
+  source: string;
+  content: string;
+  context: string;
+  evidence: BackendMatchEvidence[];
 }
 
-export interface BackendKGNode {
+/** Full response from POST /api/match (synchronous, no polling). */
+export interface BackendMatchResponse {
+  query: string;
+  found: boolean;
+  matches: BackendMatch[];
+  graphFacts: string[];
+  latency_ms: number;
+}
+
+// ─── Backend types — subgraph API (/api/debug/subgraph) ────────
+
+export interface BackendSubgraphNode {
   id: string;
   label: string;
-  type: "trial" | "condition" | "intervention" | "outcome" | "document";
-  metadata?: Record<string, unknown>;
+  tier: number;
 }
 
-export interface BackendKGEdge {
+export interface BackendSubgraphLink {
   source: string;
   target: string;
-  label: string;
-  weight?: number;
+  relation: string;
 }
 
-export interface BackendKGResponse {
-  nodes: BackendKGNode[];
-  edges: BackendKGEdge[];
-  query_focus_node: string | null;
+export interface BackendSubgraphResponse {
+  entity: string;
+  nodes: BackendSubgraphNode[];
+  links: BackendSubgraphLink[];
 }
 
-export interface BackendQuerySubmitResponse {
-  query_id: string;
-  status: "processing";
-  estimated_time: number | null;
-}
-
-export interface BackendQueryResultsResponse {
-  query_id: string;
-  status: "completed" | "processing" | "failed";
-  results: BackendResult[] | null;
-  error: string | null;
-}
-
-export interface BackendOCRBlock {
-  text: string;
-  confidence: number;
-  bbox: [number, number, number, number]; // [x0, y0, x1, y1] pixels
-}
-
-export interface BackendOCRPage {
-  page_number: number;
-  width: number;
-  height: number;
-  blocks: BackendOCRBlock[];
-}
-
-export interface BackendOCRDebugResponse {
-  pages: BackendOCRPage[];
-}
+// ─── Backend types — ingestion artifacts ──────────────────────
 
 export interface BackendChunk {
   chunk_id: string;
@@ -98,26 +76,19 @@ export interface BackendChunk {
   };
 }
 
+/** Response from GET /api/ingest/artifacts/chunks/{slug} */
 export interface BackendChunksResponse {
-  chunks: BackendChunk[];
+  slug: string;
+  total_chunks: number;
+  chunk_config: Record<string, unknown>;
+  sample_chunks: BackendChunk[];
 }
 
-export interface BackendMarkdownResponse {
-  markdown: string;
-  cleaning_log: string[];
-}
-
-export interface BackendIngestJobStatus {
-  job_id: string;
-  status: "pending" | "processing" | "completed" | "failed";
-  progress: Array<{
-    step: string;
-    status: string;
-    progress: number;
-    message: string;
-    started_at: string | null;
-    completed_at: string | null;
-  }>;
+/** Response from GET /api/ingest/artifacts/markdown/{slug} or /clean/{slug} */
+export interface BackendArtifactPreviewResponse {
+  slug: string;
+  chars: number;
+  preview: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -131,63 +102,62 @@ async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
   return res.json() as Promise<T>;
 }
 
-// ─── Query & Retrieval ─────────────────────────────────────────
-
-export interface QueryFilters {
-  condition?: string;
-  phase?: string;
-  status?: string;
-}
-
-export function submitQuery(
-  query: string,
-  options: { topK?: number; rerank?: boolean; filters?: QueryFilters } = {}
-): Promise<BackendQuerySubmitResponse> {
-  return fetchJson<BackendQuerySubmitResponse>(`${API_BASE}/api/query`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query,
-      top_k: options.topK ?? 10,
-      rerank: options.rerank ?? true,
-      filters: options.filters ?? {},
-    }),
-  });
-}
-
-export function fetchQueryResults(queryId: string): Promise<BackendQueryResultsResponse> {
-  return fetchJson<BackendQueryResultsResponse>(`${API_BASE}/api/query/${queryId}/results`);
-}
-
-export function fetchKnowledgeGraph(queryId: string): Promise<BackendKGResponse> {
-  return fetchJson<BackendKGResponse>(`${API_BASE}/api/query/${queryId}/knowledge-graph`);
-}
-
-// ─── Ingestion ────────────────────────────────────────────────
+// ─── Query & Retrieval (reasoning API, :8000) ──────────────────
 
 /**
- * POST /api/ingest — returns a raw Response so the caller can consume the SSE stream.
- * The caller is responsible for reading the response body as a stream (EventSource can't do POST).
+ * POST /api/match — synchronous GraphRAG retrieval. Returns matches directly.
+ * Uses multipart/form-data as required by the FastAPI Form(...) parameter.
  */
-export function startIngestStream(file: File, sourceId?: string): Promise<Response> {
+export function matchQuery(query: string, topK = 10): Promise<BackendMatchResponse> {
+  const form = new FormData();
+  form.append("query", query);
+  form.append("top_k", String(topK));
+  return fetchJson<BackendMatchResponse>(`${API_BASE}/api/match`, { method: "POST", body: form });
+}
+
+/**
+ * GET /api/debug/subgraph/{entity} — 1-hop Neo4j neighbourhood for a named entity.
+ * Non-fatal: returns empty nodes/links if Neo4j is unavailable.
+ */
+export function fetchSubgraph(entity: string): Promise<BackendSubgraphResponse> {
+  return fetchJson<BackendSubgraphResponse>(
+    `${API_BASE}/api/debug/subgraph/${encodeURIComponent(entity)}`
+  );
+}
+
+// ─── Ingestion (ingestion API, :8001) ─────────────────────────
+
+/**
+ * POST /api/ingest — upload a PDF and stream 5-stage pipeline progress as SSE.
+ * Returns raw Response so caller can consume the stream body.
+ * The X-Slug response header contains the document slug for subsequent artifact fetches.
+ */
+export function startIngestStream(file: File): Promise<Response> {
   const form = new FormData();
   form.append("file", file);
-  if (sourceId) form.append("source_id", sourceId);
-  return fetch(`${API_BASE}/api/ingest`, { method: "POST", body: form });
+  return fetch(`${INGEST_BASE}/api/ingest`, { method: "POST", body: form });
 }
 
-export function fetchIngestJobStatus(jobId: string): Promise<BackendIngestJobStatus> {
-  return fetchJson<BackendIngestJobStatus>(`${API_BASE}/api/ingest/${jobId}/status`);
+/** GET /api/ingest/artifacts/chunks/{slug} — first 10 sample chunks. */
+export function fetchChunks(slug: string): Promise<BackendChunksResponse> {
+  return fetchJson<BackendChunksResponse>(`${INGEST_BASE}/api/ingest/artifacts/chunks/${slug}`);
 }
 
-export function fetchOCRDebug(jobId: string): Promise<BackendOCRDebugResponse> {
-  return fetchJson<BackendOCRDebugResponse>(`${API_BASE}/api/ingest/${jobId}/debug/ocr`);
+/** GET /api/ingest/artifacts/markdown/{slug} — raw converted markdown preview. */
+export function fetchMarkdownArtifact(slug: string): Promise<BackendArtifactPreviewResponse> {
+  return fetchJson<BackendArtifactPreviewResponse>(
+    `${INGEST_BASE}/api/ingest/artifacts/markdown/${slug}`
+  );
 }
 
-export function fetchChunks(jobId: string): Promise<BackendChunksResponse> {
-  return fetchJson<BackendChunksResponse>(`${API_BASE}/api/ingest/${jobId}/chunks`);
+/** GET /api/ingest/artifacts/clean/{slug} — PII-cleaned markdown preview. */
+export function fetchCleanArtifact(slug: string): Promise<BackendArtifactPreviewResponse> {
+  return fetchJson<BackendArtifactPreviewResponse>(
+    `${INGEST_BASE}/api/ingest/artifacts/clean/${slug}`
+  );
 }
 
-export function fetchMarkdown(jobId: string): Promise<BackendMarkdownResponse> {
-  return fetchJson<BackendMarkdownResponse>(`${API_BASE}/api/ingest/${jobId}/markdown`);
+/** Returns the URL for an OCR debug visualization PNG (served by the ingestion API). */
+export function getOcrVizUrl(slug: string, page: number): string {
+  return `${INGEST_BASE}/api/ingest/artifacts/ocr-viz/${slug}/${page}`;
 }

@@ -1,16 +1,14 @@
 // Normalizes backend API response shapes into the UI's expected interface shapes.
 
 import type {
-  BackendResult,
-  BackendProvenance,
-  BackendKGNode,
-  BackendKGEdge,
-  BackendOCRPage,
+  BackendMatch,
+  BackendMatchEvidence,
+  BackendSubgraphNode,
+  BackendSubgraphLink,
   BackendChunk,
 } from "./api";
 
-// ─── UI types (duplicated here to avoid circular imports) ──────
-// These match the interfaces declared inside QueryPane.tsx / IngestionPane.tsx / KnowledgeGraph.tsx
+// ─── UI types ──────────────────────────────────────────────────
 
 export type NodeType = "patient" | "condition" | "medication" | "lab" | "trial" | "relation";
 
@@ -83,17 +81,8 @@ export interface UIChunk {
   entities: UIChunkEntity[];
 }
 
-// ─── KG node type mapping ──────────────────────────────────────
+// ─── KG layout helper ─────────────────────────────────────────
 
-const KG_TYPE_MAP: Record<BackendKGNode["type"], NodeType> = {
-  trial: "trial",
-  condition: "condition",
-  intervention: "medication",
-  outcome: "lab",
-  document: "relation",
-};
-
-// Simple force-layout seed: arrange nodes in a circle within 460×435 viewBox
 function circularLayout(count: number, index: number): { x: number; y: number } {
   if (count === 1) return { x: 230, y: 217 };
   const cx = 230;
@@ -106,118 +95,149 @@ function circularLayout(count: number, index: number): { x: number; y: number } 
   };
 }
 
-export function adaptGraphNode(node: BackendKGNode, index: number, total: number): GraphNode {
-  const { x, y } = circularLayout(total, index);
-  const type = KG_TYPE_MAP[node.type] ?? "relation";
-  const sublabelMap: Partial<Record<NodeType, string>> = {
-    condition: "dx",
-    medication: "rx",
-    lab: "lab",
-    trial: "trial",
-  };
+// ─── Result adapter (BackendMatch from /api/match) ─────────────
+
+function adaptEvidence(ev: BackendMatchEvidence, score: number): ProvenanceSource {
   return {
-    id: node.id,
-    label: node.label,
-    sublabel: sublabelMap[type],
-    type,
-    x,
-    y,
-    nctId: node.type === "trial" ? node.label : undefined,
-  };
-}
-
-export function adaptGraphEdge(edge: BackendKGEdge): GraphEdge {
-  return { from: edge.source, to: edge.target, label: edge.label };
-}
-
-// ─── Provenance adapter ────────────────────────────────────────
-
-export function adaptProvenance(prov: BackendProvenance): ProvenanceSource {
-  const [start, end] = prov.byte_range;
-  return {
-    source: prov.source_document,
-    byteRange: `${start}–${end}`,
+    source: ev.source,
+    byteRange: `${ev.byteStart}–${ev.byteEnd}`,
     page: "N/A",
-    conf: prov.confidence_score,
+    conf: score,
     preText: "",
     spans: [
       {
-        highlight: { text: prov.highlighted_text, conf: prov.confidence_score },
+        highlight: {
+          text: `${ev.head} ${ev.relation} ${ev.tail}`,
+          conf: score,
+        },
         after: "",
       },
     ],
   };
 }
 
-// ─── TrialResult adapter ───────────────────────────────────────
-
-export function adaptResult(result: BackendResult): TrialResult {
-  const meta = result.metadata ?? {};
-  const firstProv = result.provenance[0];
-  const location = firstProv
-    ? `bytes ${firstProv.byte_range[0]}–${firstProv.byte_range[1]}`
-    : "N/A";
+export function adaptResult(match: BackendMatch, index: number): TrialResult {
+  const firstEv = match.evidence[0];
+  // Use the first triplet head as the "NCT ID" placeholder — most meaningful available identifier
+  const nct = firstEv?.head ?? `CHUNK-${match.chunkIndex}`;
+  // Extract a title from context breadcrumb or fall back to content prefix
+  const title = match.context
+    ? match.context.replace(/^Context:\s*/i, "").replace(/\n+.*$/s, "").trim()
+    : match.content.slice(0, 100).trimEnd();
 
   return {
-    id: result.id,
-    nct: result.trial_id,
-    title: result.title,
-    phase: (meta.phase as string | undefined) ?? "N/A",
-    sponsor: (meta.sponsor as string | undefined) ?? "N/A",
-    enrollmentStatus: (meta.enrollment_status as string | undefined) ?? "N/A",
-    matchScore: result.relevance_score,
-    strategy: (meta.strategy as string | undefined) ?? "Dense",
-    matchedCriteria: result.matched_criteria,
-    source: firstProv?.source_document ?? "N/A",
-    location,
-    snippet: result.snippet,
-    provenances: result.provenance.map(adaptProvenance),
+    id: index,
+    nct,
+    title: title || `Result ${index + 1}`,
+    phase: "N/A",
+    sponsor: "N/A",
+    enrollmentStatus: "N/A",
+    matchScore: match.score,
+    strategy: "GraphRAG + Dense",
+    matchedCriteria: match.evidence.map((e) => `${e.head} → ${e.tail}`),
+    source: match.source,
+    location: match.source,
+    snippet: match.content,
+    provenances: match.evidence.length > 0
+      ? match.evidence.map((e) => adaptEvidence(e, match.score))
+      : [],
   };
 }
 
-// ─── OCR adapter ──────────────────────────────────────────────
+// ─── KG adapter: build graph from match evidence + graphFacts ──
 
-// Target viewBox for the OcrDebugViz component
-const OCR_VIEW_W = 460;
-const OCR_VIEW_H = 175;
+const GRAPH_FACT_RE = /^(.+?)\s+--\[(.+?)\]-->\s+(.+)$/;
 
-function confidenceLabel(conf: number): "high" | "medium" | "low" {
-  if (conf >= 0.85) return "high";
-  if (conf >= 0.65) return "medium";
-  return "low";
-}
+const TIER_TYPE_MAP: Record<number, NodeType> = {
+  1: "condition",
+  2: "medication",
+};
 
-export function adaptOcrBoxes(page: BackendOCRPage): OcrBox[] {
-  if (!page || page.blocks.length === 0) return [];
-  const scaleX = OCR_VIEW_W / (page.width || OCR_VIEW_W);
-  const scaleY = OCR_VIEW_H / (page.height || OCR_VIEW_H);
-  return page.blocks.map((block) => {
-    const [x0, y0, x1, y1] = block.bbox;
-    return {
-      top: Math.round(y0 * scaleY),
-      left: Math.round(x0 * scaleX),
-      width: Math.round((x1 - x0) * scaleX),
-      height: Math.round((y1 - y0) * scaleY),
-      label: block.text,
-      conf: confidenceLabel(block.confidence),
-    };
+function ensureNode(
+  nodeMap: Map<string, GraphNode>,
+  id: string,
+  tier: number
+): void {
+  if (nodeMap.has(id)) return;
+  const type: NodeType = TIER_TYPE_MAP[tier] ?? "relation";
+  const sublabelMap: Partial<Record<NodeType, string>> = {
+    condition: "entity",
+    medication: "rx",
+    lab: "lab",
+    trial: "trial",
+  };
+  nodeMap.set(id, {
+    id,
+    label: id,
+    sublabel: sublabelMap[type],
+    type,
+    x: 0,
+    y: 0,
   });
 }
 
-export function adaptOcrHeatmap(page: BackendOCRPage, cols = 6): number[][] {
-  if (!page || page.blocks.length === 0) return [];
-  const confidences = page.blocks.map((b) => b.confidence);
-  const rowCount = Math.ceil(confidences.length / cols);
-  const grid: number[][] = [];
-  for (let r = 0; r < rowCount; r++) {
-    const row: number[] = [];
-    for (let c = 0; c < cols; c++) {
-      const idx = r * cols + c;
-      row.push(idx < confidences.length ? confidences[idx] : 1.0);
+export function adaptGraphFromMatch(
+  graphFacts: string[],
+  matches: BackendMatch[]
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const nodeMap = new Map<string, GraphNode>();
+  const edgeSet = new Set<string>();
+  const edges: GraphEdge[] = [];
+
+  function addEdge(from: string, to: string, label: string, headTier = 1, tailTier = 2) {
+    ensureNode(nodeMap, from, headTier);
+    ensureNode(nodeMap, to, tailTier);
+    const key = `${from}|${to}|${label}`;
+    if (!edgeSet.has(key)) {
+      edgeSet.add(key);
+      edges.push({ from, to, label });
     }
-    grid.push(row);
   }
-  return grid;
+
+  // Parse graphFacts strings: "head --[relation]--> tail"
+  for (const fact of graphFacts) {
+    const m = GRAPH_FACT_RE.exec(fact.trim());
+    if (!m) continue;
+    addEdge(m[1].trim(), m[3].trim(), m[2].trim());
+  }
+
+  // Supplement with inline evidence triplets
+  for (const match of matches) {
+    for (const ev of match.evidence) {
+      addEdge(ev.head, ev.tail, ev.relation, ev.tier, ev.tier + 1);
+    }
+  }
+
+  const nodes = [...nodeMap.values()];
+  nodes.forEach((n, i) => {
+    const pos = circularLayout(nodes.length, i);
+    n.x = pos.x;
+    n.y = pos.y;
+  });
+
+  return { nodes, edges };
+}
+
+// ─── Subgraph adapter (GET /api/debug/subgraph/{entity}) ───────
+
+export function adaptSubgraphNode(
+  node: BackendSubgraphNode,
+  index: number,
+  total: number
+): GraphNode {
+  const { x, y } = circularLayout(total, index);
+  const type: NodeType = node.tier === 1 ? "condition" : "medication";
+  return {
+    id: node.id,
+    label: node.label,
+    type,
+    x,
+    y,
+  };
+}
+
+export function adaptSubgraphLink(link: BackendSubgraphLink): GraphEdge {
+  return { from: link.source, to: link.target, label: link.relation };
 }
 
 // ─── Chunk adapter ────────────────────────────────────────────
@@ -229,7 +249,6 @@ export function adaptChunk(chunk: BackendChunk, index: number): UIChunk {
     page: (chunk.metadata.page_number as number | undefined) ?? 1,
     tokenCount: (chunk.metadata.token_count as number | undefined) ?? 0,
     text: chunk.text,
-    // TODO: wire entity extraction once backend provides NER output
     entities: [],
   };
 }
