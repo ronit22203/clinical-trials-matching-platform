@@ -17,6 +17,7 @@
 |----------|-------------|
 | [Configuration](configuration.md) | `config/app.yaml` field-by-field reference |
 | [API Reference](api-reference.md) | FastAPI endpoint schemas and examples |
+| [Backend Endpoints](backend-endpoints.md) | Query & Retrieval + Ingestion Pipeline endpoint specs, TypeScript types, SSE events |
 | [Make Reference](make-reference.md) | All `make` targets organised by module |
 
 ## Module Overview

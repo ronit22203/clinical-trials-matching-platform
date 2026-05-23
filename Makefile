@@ -9,11 +9,12 @@ RED    := \033[31m
 BOLD   := \033[1m
 NC     := \033[0m
 
-REASONING_DIR := agentic-reasoning
+REASONING_DIR   := agentic-reasoning
 ACQUISITION_DIR := data-acquisition
-INGESTION_DIR := data-ingestion
+INGESTION_DIR   := data-ingestion
 BENCHMARKING_DIR := benchmarking
-CONFIG_FILE := config/app.yaml
+BLUEPRINT_DIR   := palantir-blueprint
+CONFIG_FILE     := config/app.yaml
 
 REASONING_PYTHON := .venv/bin/python
 ACQUISITION_PYTHON := .venv/bin/python
@@ -63,6 +64,7 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	reasoning-graphrag-up reasoning-graphrag-down \
 	reasoning-download-models reasoning-sglang-run reasoning-sglang-run-query \
 	simple-ui-serve \
+	blueprint-install blueprint-dev blueprint-build blueprint-preview blueprint-clean \
 	acquisition-install acquisition-test acquisition-fetch acquisition-source-validate \
 	acquisition-source-search acquisition-source-fetch \
 	ingestion-install ingestion-api ingestion-test ingestion-test-processors ingestion-test-embedder \
@@ -128,16 +130,16 @@ down: ## Stop shared infrastructure and API/UI services
 serve: ## Start the reasoning agent in interactive CLI mode
 	@$(MAKE) --no-print-directory reasoning-run
 
-dev: ## ★ Start all services: reasoning API (:8000), ingestion API (:8001), simple-ui (:3000)
+dev: ## ★ Start all services: reasoning API (:8000), ingestion API (:8001), blueprint UI (:5173)
 	@printf "$(BOLD)$(GREEN)Starting all services…$(NC)\n"
 	@printf "  Reasoning API  → $(CYAN)http://localhost:8000$(NC)\n"
 	@printf "  Ingestion API  → $(CYAN)http://localhost:8001$(NC)\n"
-	@printf "  Simple UI      → $(CYAN)http://localhost:3000$(NC)\n\n"
+	@printf "  Blueprint UI   → $(CYAN)http://localhost:5173$(NC)\n\n"
 	@printf "  Press $(BOLD)Ctrl+C$(NC) to stop all services.\n\n"
 	@trap 'kill 0' INT; \
 	 (cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --port 8000 --reload 2>&1 | sed 's/^/[reasoning] /') & \
 	 (cd $(INGESTION_DIR) && python3 -m uvicorn src.api.server:app --port 8001 --reload 2>&1 | sed 's/^/[ingestion] /') & \
-	 (python3 -m http.server 3000 --directory simple-ui 2>&1 | sed 's/^/[ui]        /') & \
+	 (cd $(BLUEPRINT_DIR) && npm run dev 2>&1 | sed 's/^/[blueprint] /') & \
 	 wait
 
 fetch: acquisition-fetch ## Fetch PDFs via data-acquisition
@@ -380,6 +382,31 @@ reasoning-serve: ## Start reasoning HTTP API server on :8000
 
 simple-ui-serve: ## Serve the simple-ui on :3000
 	@python3 -m http.server 3000 --directory simple-ui
+
+# --- [ Blueprint UI ] ---------------------------------------------------------
+
+blueprint-install: ## Install palantir-blueprint npm dependencies
+	@printf "$(BLUE)Installing blueprint UI dependencies…$(NC)\n"
+	@cd $(BLUEPRINT_DIR) && npm install
+	@printf "$(GREEN)blueprint-install done.$(NC)\n"
+
+blueprint-dev: ## Start blueprint Vite dev server on :5173 (hot-reload)
+	@printf "$(BLUE)Starting blueprint dev server → $(CYAN)http://localhost:5173$(NC)\n"
+	@cd $(BLUEPRINT_DIR) && npm run dev
+
+blueprint-build: ## Production build of blueprint UI → palantir-blueprint/dist/
+	@printf "$(BLUE)Building blueprint UI…$(NC)\n"
+	@cd $(BLUEPRINT_DIR) && npm run build
+	@printf "$(GREEN)$(BOLD)blueprint-build done → $(BLUEPRINT_DIR)/dist/$(NC)\n"
+
+blueprint-preview: blueprint-build ## Build then preview production bundle on :4173
+	@printf "$(BLUE)Previewing blueprint production build → $(CYAN)http://localhost:4173$(NC)\n"
+	@cd $(BLUEPRINT_DIR) && npm run preview
+
+blueprint-clean: ## Remove blueprint node_modules and dist
+	@printf "$(YELLOW)Removing $(BLUEPRINT_DIR)/node_modules and dist…$(NC)\n"
+	@rm -rf $(BLUEPRINT_DIR)/node_modules $(BLUEPRINT_DIR)/dist
+	@printf "$(GREEN)blueprint-clean done.$(NC)\n"
 
 reasoning-graphrag-up: ## Start GraphRAG backing services (Qdrant + Neo4j)
 	@cd $(REASONING_DIR) && docker compose -p clinical_agents -f infra/docker-compose.graphrag.yml up -d
