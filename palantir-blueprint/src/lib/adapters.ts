@@ -243,12 +243,13 @@ export function adaptSubgraphLink(link: BackendSubgraphLink): GraphEdge {
 // ─── Chunk adapter ────────────────────────────────────────────
 
 export function adaptChunk(chunk: BackendChunk, index: number): UIChunk {
+  const charCount = chunk.char_end - chunk.char_start;
   return {
     id: index + 1,
     charRange: [chunk.char_start, chunk.char_end],
-    page: (chunk.metadata.page_number as number | undefined) ?? 1,
-    tokenCount: (chunk.metadata.token_count as number | undefined) ?? 0,
-    text: chunk.text,
+    page: chunk.page_number ?? 1,
+    tokenCount: Math.round(charCount / 4), // rough 1 token ≈ 4 chars
+    text: chunk.content,
     entities: [],
   };
 }

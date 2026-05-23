@@ -60,20 +60,15 @@ export interface BackendSubgraphResponse {
 
 // ─── Backend types — ingestion artifacts ──────────────────────
 
+/** One chunk from GET /api/ingest/artifacts/chunks/{slug} (matches MarkdownChunker output) */
 export interface BackendChunk {
-  chunk_id: string;
-  text: string;
-  section_title: string;
-  depth: number;
-  parent_id: string | null;
+  content: string;       // full text with breadcrumb prefix "Context: A > B\n\n..."
+  context: string;       // breadcrumb path, e.g. "Methods > Data Sources"
+  level: number;
+  page_number: number | null;
+  is_boilerplate: boolean;
   char_start: number;
   char_end: number;
-  metadata: {
-    source_document?: string;
-    token_count?: number;
-    page_number?: number;
-    [key: string]: unknown;
-  };
 }
 
 /** Response from GET /api/ingest/artifacts/chunks/{slug} */

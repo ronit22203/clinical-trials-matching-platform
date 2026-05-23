@@ -58,8 +58,14 @@ const ENTITY_COLORS: Record<ChunkEntity["type"], { bg: string; text: string }> =
 
 function OcrDebugViz({
   vizUrl,
+  page,
+  pageCount,
+  onPageChange,
 }: {
   vizUrl: string | null;
+  page: number;
+  pageCount: number;
+  onPageChange: (p: number) => void;
 }) {
   if (!vizUrl) {
     return (
@@ -69,17 +75,34 @@ function OcrDebugViz({
     );
   }
   return (
-    <Card
-      elevation={Elevation.ONE}
-      style={{ height: 175, overflow: "hidden", background: "var(--surface-2)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}
-    >
-      <img
-        src={vizUrl}
-        alt="OCR debug visualization — bounding boxes overlaid on page"
-        style={{ maxHeight: 175, maxWidth: "100%", objectFit: "contain" }}
-        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-      />
-    </Card>
+    <>
+      <Card
+        elevation={Elevation.ONE}
+        style={{ height: 175, overflow: "hidden", background: "var(--surface-2)", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}
+      >
+        <img
+          src={vizUrl}
+          alt="OCR debug visualization — bounding boxes overlaid on page"
+          style={{ maxHeight: 175, maxWidth: "100%", objectFit: "contain" }}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+        />
+      </Card>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+        <Button
+          minimal small icon="chevron-left" disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+          style={{ minWidth: 24 }}
+        />
+        <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)", flex: 1 }}>
+          Surya OCR bounding-box overlay — page {page} / {pageCount}
+        </span>
+        <Button
+          minimal small icon="chevron-right" disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+          style={{ minWidth: 24 }}
+        />
+      </div>
+    </>
   );
 }
 
@@ -231,6 +254,8 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
   const [selectedFile, setSelectedFile]   = useState<File | null>(null);
   const [jobId, setJobId]                 = useState<string | null>(null);
   const [ocrVizUrl, setOcrVizUrl]         = useState<string | null>(null);
+  const [ocrPageCount, setOcrPageCount]   = useState<number>(1);
+  const [ocrPage, setOcrPage]             = useState<number>(1);
   const [liveChunks, setLiveChunks]       = useState<Chunk[]>([]);
   const [cleanedMarkdown, setCleanedMarkdown] = useState<string>("");
   const [rawOcrText, setRawOcrText]       = useState<string>("");
@@ -257,9 +282,11 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     setLogLines((prev) => [...prev, line]);
   }
 
-  async function fetchPostRunData(slug: string) {
-    // Set OCR viz image URL immediately (PNG served by ingestion API, page 1)
+  async function fetchPostRunData(slug: string, pageCount?: number) {
+    // Set OCR viz image URL immediately (PNG served by ingestion API)
     setOcrVizUrl(getOcrVizUrl(slug, 1));
+    setOcrPage(1);
+    if (pageCount) setOcrPageCount(pageCount);
 
     // Parallel fetch chunks + raw markdown + cleaned markdown
     const [chunksResult, rawResult, cleanResult] = await Promise.allSettled([
@@ -286,6 +313,8 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     setLogLines([]);
     setJobId(null);
     setOcrVizUrl(null);
+    setOcrPage(1);
+    setOcrPageCount(1);
     setLiveChunks([]);
     setCleanedMarkdown("");
     setRawOcrText("");
@@ -316,6 +345,7 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
 
     // Extract slug from X-Slug response header (set by the ingestion API)
     const slug = response.headers.get("X-Slug") ?? "";
+    let ocrPages = 1; // captured from ocr:done SSE event
 
     try {
       while (true) {
@@ -350,9 +380,14 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
             setDone(true);
             if (eventSlug) {
               setJobId(eventSlug);
-              fetchPostRunData(eventSlug);
+              fetchPostRunData(eventSlug, ocrPages);
             }
             return;
+          }
+
+          // Capture OCR page count when OCR stage completes
+          if (stage === "ocr" && status === "done" && extra.pages) {
+            ocrPages = extra.pages as number;
           }
 
           if (stage === "error") {
@@ -392,6 +427,8 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     setLogLines([]);
     setJobId(null);
     setOcrVizUrl(null);
+    setOcrPage(1);
+    setOcrPageCount(1);
     setLiveChunks([]);
     setCleanedMarkdown("");
     setRawOcrText("");
@@ -580,12 +617,15 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
                 OCR Debug Visualization
               </H5>
             </div>
-            <OcrDebugViz vizUrl={ocrVizUrl} />
-            {ocrVizUrl && (
-              <div style={{ marginTop: 6, fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
-                Surya OCR bounding-box overlay — page 1
-              </div>
-            )}
+            <OcrDebugViz
+              vizUrl={ocrVizUrl}
+              page={ocrPage}
+              pageCount={ocrPageCount}
+              onPageChange={(p) => {
+                setOcrPage(p);
+                if (jobId) setOcrVizUrl(getOcrVizUrl(jobId, p));
+              }}
+            />
           </div>
         )}
 
