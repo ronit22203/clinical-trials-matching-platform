@@ -213,6 +213,8 @@ export default function QueryPane({ clinicianMode }: { clinicianMode: boolean })
     graph: liveGraph,
     meta: liveMeta,
     errorMsg: liveErrorMsg,
+    synthesis,
+    synthesisLoading,
     runQuery: apiRunQuery,
     resetQuery,
   } = useQueryPoll();
@@ -307,7 +309,7 @@ export default function QueryPane({ clinicianMode }: { clinicianMode: boolean })
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
 
-        {/* ── Synthesis card — no backend endpoint yet ─────────── */}
+        {/* ── Synthesis card ───────────────────────────────────── */}
         <Card
           elevation={Elevation.TWO}
           style={{ padding: "14px 16px", borderRadius: 10 }}
@@ -316,13 +318,33 @@ export default function QueryPane({ clinicianMode }: { clinicianMode: boolean })
             <span className="section-label" style={{ margin: 0 }}>
               {clinicianMode ? "CLINICAL SUMMARY" : "AI SYNTHESIS"}
             </span>
-            <Tag minimal style={{ fontSize: 9 }}>pending</Tag>
+            {synthesisLoading && (
+              <Tag minimal intent={Intent.PRIMARY} style={{ fontSize: 9 }}>generating…</Tag>
+            )}
+            {!synthesisLoading && !synthesis && (
+              <Tag minimal style={{ fontSize: 9 }}>pending</Tag>
+            )}
+            {!synthesisLoading && synthesis && (
+              <Tag minimal intent={Intent.SUCCESS} style={{ fontSize: 9 }}>done</Tag>
+            )}
           </div>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>
-            {clinicianMode
-              ? "AI-generated clinical summary not yet available for this query."
-              : "Synthesis endpoint not yet wired — enable POST /api/synthesize to populate this card."}
-          </p>
+          {synthesisLoading ? (
+            <>
+              <div className={Classes.SKELETON} style={{ height: 12, width: "100%", marginBottom: 6, borderRadius: 2 }} />
+              <div className={Classes.SKELETON} style={{ height: 12, width: "90%", marginBottom: 6, borderRadius: 2 }} />
+              <div className={Classes.SKELETON} style={{ height: 12, width: "75%", borderRadius: 2 }} />
+            </>
+          ) : synthesis ? (
+            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+              {synthesis}
+            </p>
+          ) : (
+            <p style={{ margin: 0, fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>
+              {clinicianMode
+                ? "AI-generated clinical summary not yet available for this query."
+                : "Synthesis will appear here after a query returns results."}
+            </p>
+          )}
         </Card>
 
         {/* ── Meta row ─────────────────────────────────────────── */}

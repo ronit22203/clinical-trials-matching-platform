@@ -1,7 +1,7 @@
 // React hook: submits a query to /api/match (synchronous) and builds KG from response.
 
 import { useCallback, useRef, useState } from "react";
-import { matchQuery, fetchSubgraph } from "./api";
+import { matchQuery, fetchSubgraph, fetchSynthesis } from "./api";
 import { adaptResult, adaptGraphFromMatch, adaptSubgraphNode, adaptSubgraphLink } from "./adapters";
 import type { TrialResult, GraphNode, GraphEdge } from "./adapters";
 
@@ -20,6 +20,8 @@ interface UseQueryPollResult {
   graph: { nodes: GraphNode[]; edges: GraphEdge[] } | null;
   meta: QueryMeta | null;
   errorMsg: string | null;
+  synthesis: string | null;
+  synthesisLoading: boolean;
   runQuery: (query: string, options?: RunQueryOptions) => void;
   resetQuery: () => void;
 }
@@ -34,6 +36,8 @@ export function useQueryPoll(): UseQueryPollResult {
   const [graph, setGraph] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
   const [meta, setMeta] = useState<QueryMeta | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [synthesis, setSynthesis] = useState<string | null>(null);
+  const [synthesisLoading, setSynthesisLoading] = useState(false);
 
   // Abort controller so a new query can cancel an in-flight one
   const abortRef = useRef<AbortController | null>(null);
@@ -48,6 +52,8 @@ export function useQueryPoll(): UseQueryPollResult {
     setGraph(null);
     setMeta(null);
     setErrorMsg(null);
+    setSynthesis(null);
+    setSynthesisLoading(false);
 
     try {
       const res = await matchQuery(query, options.topK ?? 10);
@@ -76,19 +82,29 @@ export function useQueryPoll(): UseQueryPollResult {
         setGraph(inlineGraph);
       }
 
-      // Optionally enrich with Neo4j subgraph for the most prominent entity
+      // Fire synthesis and subgraph enrichment in parallel (both non-fatal)
+      setSynthesisLoading(true);
+
       const topEntity = res.matches[0]?.evidence[0]?.head;
-      if (topEntity && !abort.signal.aborted) {
-        fetchSubgraph(topEntity)
-          .then((sub) => {
-            if (abort.signal.aborted || sub.nodes.length === 0) return;
-            const nodes = sub.nodes.map((n, i) => adaptSubgraphNode(n, i, sub.nodes.length));
-            const edges = sub.links.map(adaptSubgraphLink);
-            setGraph({ nodes, edges });
-          })
-          .catch(() => {
-            // Neo4j subgraph is non-fatal — inline KG already shown
-          });
+
+      const [synthResult] = await Promise.allSettled([
+        fetchSynthesis(query, res.matches),
+        topEntity
+          ? fetchSubgraph(topEntity).then((sub) => {
+              if (abort.signal.aborted || sub.nodes.length === 0) return;
+              const nodes = sub.nodes.map((n, i) => adaptSubgraphNode(n, i, sub.nodes.length));
+              const edges = sub.links.map(adaptSubgraphLink);
+              setGraph({ nodes, edges });
+            }).catch(() => { /* Neo4j non-fatal */ })
+          : Promise.resolve(),
+      ]);
+
+      if (!abort.signal.aborted) {
+        setSynthesisLoading(false);
+        if (synthResult.status === "fulfilled") {
+          setSynthesis(synthResult.value.synthesis);
+        }
+        // synthesis failure is silent — card stays in "no response" state
       }
     } catch (err) {
       if (abort.signal.aborted) return;
@@ -104,7 +120,9 @@ export function useQueryPoll(): UseQueryPollResult {
     setGraph(null);
     setMeta(null);
     setErrorMsg(null);
+    setSynthesis(null);
+    setSynthesisLoading(false);
   }
 
-  return { queryState, results, graph, meta, errorMsg, runQuery, resetQuery };
+  return { queryState, results, graph, meta, errorMsg, synthesis, synthesisLoading, runQuery, resetQuery };
 }

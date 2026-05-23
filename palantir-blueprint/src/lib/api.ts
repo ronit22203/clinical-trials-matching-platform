@@ -86,7 +86,13 @@ export interface BackendArtifactPreviewResponse {
   preview: string;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────
+export interface BackendSynthesisResponse {
+  synthesis: string;
+  model: string;
+  tokensUsed: number | null;
+}
+
+
 
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const res = await fetch(input, init);
@@ -111,9 +117,18 @@ export function matchQuery(query: string, topK = 10): Promise<BackendMatchRespon
 }
 
 /**
- * GET /api/debug/subgraph/{entity} — 1-hop Neo4j neighbourhood for a named entity.
- * Non-fatal: returns empty nodes/links if Neo4j is unavailable.
+ * POST /api/synthesis — Phase 2 LLM synthesis grounded in cached GraphRAG evidence.
+ * Pass the raw matches from /api/match; the server reuses its cached retrieval result.
  */
+export function fetchSynthesis(query: string, evidence: unknown[]): Promise<BackendSynthesisResponse> {
+  return fetchJson<BackendSynthesisResponse>(`${API_BASE}/api/synthesis`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, evidence }),
+  });
+}
+
+
 export function fetchSubgraph(entity: string): Promise<BackendSubgraphResponse> {
   return fetchJson<BackendSubgraphResponse>(
     `${API_BASE}/api/debug/subgraph/${encodeURIComponent(entity)}`
