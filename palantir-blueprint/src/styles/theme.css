@@ -445,3 +445,12 @@ body::before {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0; }
 }
+
+/* ─── Synthesis banner ──────────────────────────────────────── */
+.synthesis-banner {
+  padding: 10px 14px 12px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--accent-primary);
+  background: var(--surface-1);
+  flex-shrink: 0;
+}

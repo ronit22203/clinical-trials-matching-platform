@@ -10,6 +10,7 @@ import {
   InputGroup,
   Intent,
   NonIdealState,
+  Popover,
   Pre,
   Tab,
   Tabs,
@@ -160,14 +161,6 @@ function ResultCard({
         </div>
       </div>
 
-      {/* Matched criteria */}
-      <div style={{ display: "flex", gap: 5, marginBottom: 7, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontFamily: "var(--text-mono)", fontSize: 9, color: "var(--text-dim)" }}>MATCHED:</span>
-        {result.matchedCriteria.map((c) => (
-          <Tag key={c} minimal intent={Intent.PRIMARY} style={{ fontSize: 10 }}>{c}</Tag>
-        ))}
-      </div>
-
       {/* Snippet */}
       <p style={{ margin: 0, fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>{result.snippet}</p>
       <div style={{ marginTop: 5, fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
@@ -179,6 +172,13 @@ function ResultCard({
       {expanded && (
         <div style={{ marginTop: 12 }}>
           <Divider style={{ margin: "0 0 10px" }} />
+          {/* Matched criteria — shown only on expand */}
+          <div style={{ display: "flex", gap: 5, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontFamily: "var(--text-mono)", fontSize: 9, color: "var(--text-dim)" }}>MATCHED:</span>
+            {result.matchedCriteria.map((c) => (
+              <Tag key={c} minimal intent={Intent.PRIMARY} style={{ fontSize: 10 }}>{c}</Tag>
+            ))}
+          </div>
           <div className="section-label" style={{ marginBottom: 8 }}>
             {clinicianMode ? "SOURCE" : "BYTE-LEVEL PROVENANCE"} — {result.provenances.length} source{result.provenances.length > 1 ? "s" : ""}
           </div>
@@ -309,44 +309,6 @@ export default function QueryPane({ clinicianMode }: { clinicianMode: boolean })
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
 
-        {/* ── Synthesis card ───────────────────────────────────── */}
-        <Card
-          elevation={Elevation.TWO}
-          style={{ padding: "14px 16px", borderRadius: 10 }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <span className="section-label" style={{ margin: 0 }}>
-              {clinicianMode ? "CLINICAL SUMMARY" : "AI SYNTHESIS"}
-            </span>
-            {synthesisLoading && (
-              <Tag minimal intent={Intent.PRIMARY} style={{ fontSize: 9 }}>generating…</Tag>
-            )}
-            {!synthesisLoading && !synthesis && (
-              <Tag minimal style={{ fontSize: 9 }}>pending</Tag>
-            )}
-            {!synthesisLoading && synthesis && (
-              <Tag minimal intent={Intent.SUCCESS} style={{ fontSize: 9 }}>done</Tag>
-            )}
-          </div>
-          {synthesisLoading ? (
-            <>
-              <div className={Classes.SKELETON} style={{ height: 12, width: "100%", marginBottom: 6, borderRadius: 2 }} />
-              <div className={Classes.SKELETON} style={{ height: 12, width: "90%", marginBottom: 6, borderRadius: 2 }} />
-              <div className={Classes.SKELETON} style={{ height: 12, width: "75%", borderRadius: 2 }} />
-            </>
-          ) : synthesis ? (
-            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
-              {synthesis}
-            </p>
-          ) : (
-            <p style={{ margin: 0, fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>
-              {clinicianMode
-                ? "AI-generated clinical summary not yet available for this query."
-                : "Synthesis will appear here after a query returns results."}
-            </p>
-          )}
-        </Card>
-
         {/* ── Meta row ─────────────────────────────────────────── */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 2 }}>
           <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
@@ -447,130 +409,153 @@ export default function QueryPane({ clinicianMode }: { clinicianMode: boolean })
           padding: "10px 14px",
           borderBottom: "1px solid var(--border)",
           display: "flex",
-          flexDirection: "column",
+          alignItems: "center",
           gap: 8,
         }}
       >
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <InputGroup
-            placeholder="e.g. heparin dosing renal impairment STEMI..."
-            leftIcon="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && runQuery()}
-            fill
-            style={{ fontFamily: "var(--text-mono)" }}
-            rightElement={
-              query ? (
-                <Button minimal icon="cross" onClick={() => { setQuery(""); resetQuery(); }} />
-              ) : undefined
-            }
-          />
+        <InputGroup
+          placeholder="e.g. heparin dosing renal impairment STEMI..."
+          leftIcon="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && runQuery()}
+          fill
+          style={{ fontFamily: "var(--text-mono)" }}
+          rightElement={
+            query ? (
+              <Button minimal icon="cross" onClick={() => { setQuery(""); resetQuery(); }} />
+            ) : undefined
+          }
+        />
+        {/* Filter — floats as Popover, no layout shift */}
+        <Popover
+          isOpen={showFilters}
+          onClose={() => setShowFilters(false)}
+          placement="bottom-end"
+          content={
+            <div style={{ padding: "12px 14px", minWidth: 240, display: "flex", flexDirection: "column", gap: 10 }}>
+              {(Object.entries(FILTER_OPTIONS) as [keyof typeof FILTER_OPTIONS, string[]][]).map(([cat, options]) => (
+                <div key={cat}>
+                  <div className="section-label" style={{ marginBottom: 6 }}>{cat.toUpperCase()}</div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {options.map((opt) => {
+                      const active = activeFilters[cat].includes(opt);
+                      return (
+                        <Tag
+                          key={opt}
+                          minimal={!active}
+                          intent={active ? Intent.PRIMARY : Intent.NONE}
+                          interactive
+                          onClick={() => toggleFilter(cat, opt)}
+                          style={{ fontSize: 10, cursor: "pointer" }}
+                        >
+                          {opt}
+                        </Tag>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {anyFilterActive && (
+                <Button
+                  minimal small fill
+                  intent={Intent.WARNING}
+                  text="Clear all filters"
+                  onClick={() => { setActiveFilters({ phase: [], status: [], strategy: [] }); setShowFilters(false); }}
+                  style={{ fontFamily: "var(--text-mono)", fontSize: 10, marginTop: 2 }}
+                />
+              )}
+            </div>
+          }
+        >
           <Button
             minimal
             icon="filter"
-            active={showFilters}
+            active={showFilters || anyFilterActive}
             onClick={() => setShowFilters((v) => !v)}
             title="Advanced filters"
             style={{ flexShrink: 0 }}
           />
-          <Button
-            intent={Intent.SUCCESS}
-            text="RUN"
-            loading={queryState === "loading"}
-            onClick={runQuery}
-            style={{ flexShrink: 0, fontFamily: "var(--text-mono)", letterSpacing: "0.08em" }}
-          />
-        </div>
+        </Popover>
+        <Button
+          intent={Intent.SUCCESS}
+          text="RUN"
+          loading={queryState === "loading"}
+          onClick={runQuery}
+          style={{ flexShrink: 0, fontFamily: "var(--text-mono)", letterSpacing: "0.08em" }}
+        />
+      </div>
 
-        {/* Filter row */}
-        {showFilters && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {(Object.entries(FILTER_OPTIONS) as [keyof typeof FILTER_OPTIONS, string[]][]).map(([cat, options]) => (
-              <div key={cat} style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
-                <span style={{ fontFamily: "var(--text-mono)", fontSize: 9, color: "var(--text-dim)", width: 52 }}>
-                  {cat.toUpperCase()}
-                </span>
-                {options.map((opt) => {
-                  const active = activeFilters[cat].includes(opt);
-                  return (
-                    <Tag
-                      key={opt}
-                      minimal={!active}
-                      intent={active ? Intent.PRIMARY : Intent.NONE}
-                      interactive
-                      onClick={() => toggleFilter(cat, opt)}
-                      style={{ fontSize: 10, cursor: "pointer" }}
-                    >
-                      {opt}
-                    </Tag>
-                  );
-                })}
-              </div>
-            ))}
+      {/* Synthesis banner — sticky, above the scroll area */}
+      {queryState === "results" && (
+        <div className="synthesis-banner">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: synthesisLoading || synthesis ? 8 : 0 }}>
+            <span className="section-label" style={{ margin: 0 }}>
+              {clinicianMode ? "CLINICAL SUMMARY" : "AI SYNTHESIS"}
+            </span>
+            {synthesisLoading && <Tag minimal intent={Intent.PRIMARY} style={{ fontSize: 9 }}>generating…</Tag>}
+            {!synthesisLoading && synthesis && <Tag minimal intent={Intent.SUCCESS} style={{ fontSize: 9 }}>done</Tag>}
           </div>
+          {synthesisLoading ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <div className={Classes.SKELETON} style={{ height: 11, width: "100%", borderRadius: 2 }} />
+              <div className={Classes.SKELETON} style={{ height: 11, width: "85%", borderRadius: 2 }} />
+            </div>
+          ) : synthesis ? (
+            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.65, color: "var(--text-secondary)", whiteSpace: "pre-wrap" }}>
+              {synthesis}
+            </p>
+          ) : null}
+        </div>
+      )}
+
+      {/* Tab content */}
+      <div style={{ flex: 1, overflow: "auto", padding: "10px 14px 14px" }}>
+        {clinicianMode ? (
+          /* clinicianMode: single RESULTS panel, no visible tab strip */
+          <ResultsPanel />
+        ) : (
+          <Tabs
+            id="result-tabs"
+            selectedTabId={activeTab}
+            onChange={(id) => setActiveTab(id as string)}
+            renderActiveTabPanelOnly
+          >
+            <Tab
+              id="results"
+              title={resultCount > 0 ? `RESULTS (${resultCount})` : "RESULTS"}
+              panel={<ResultsPanel />}
+            />
+            <Tab id="provenance" title="PROVENANCE" panel={<ProvenancePanel />} />
+            <Tab id="kg"         title="ENTITY GRAPH" panel={<GraphPanel />} />
+          </Tabs>
         )}
       </div>
 
-      {/* Tab content — bento container */}
-      <div style={{ flex: 1, overflow: "auto", padding: "10px 14px 14px" }}>
-        <div style={{
-          border: "1px solid var(--border)",
-          borderRadius: 12,
-          overflow: "hidden",
-          minHeight: "100%",
-          background: "var(--surface-1)",
-        }}>
-        <Tabs
-          id="result-tabs"
-          selectedTabId={activeTab}
-          onChange={(id) => setActiveTab(id as string)}
-          renderActiveTabPanelOnly
-        >
-          <Tab
-            id="results"
-            title={resultCount > 0 ? `RESULTS (${resultCount})` : "RESULTS"}
-            panel={<ResultsPanel />}
-          />
-          <Tab id="provenance" title="PROVENANCE" panel={<ProvenancePanel />} />
-          <Tab id="kg"         title="ENTITY GRAPH" panel={<GraphPanel />} />
-        </Tabs>
-        </div>
-      </div>
-
-      {/* Status bar */}
+      {/* Status bar — lean */}
       <div
         style={{
           borderTop: "1px solid var(--border)",
-          padding: "5px 14px",
+          padding: "4px 14px",
           display: "flex",
-          gap: 16,
           alignItems: "center",
+          gap: 8,
         }}
       >
         {clinicianMode ? (
-          <>
-            <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
-              RESULTS: <span style={{ color: "var(--text-secondary)" }}>{queryState === "results" ? String(results.length) : "—"}</span>
-            </span>
-            <Divider />
-            <Tag minimal intent={Intent.SUCCESS}>Search ready</Tag>
-          </>
+          <span className="status-dot" style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
+            <span style={{ color: "var(--status-nominal)", marginRight: 5 }}>●</span>System ready
+          </span>
         ) : (
-          <>
+          <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
             {[
-              ["RESULTS",  queryState === "results" ? String(liveMeta?.totalHits ?? results.length) : "—"],
-              ["LATENCY",  queryState === "results" ? (liveMeta ? `${liveMeta.latencyMs}ms` : "—") : "—"],
-              ["INDEX",    liveMeta?.indexVersion ?? "—"],
-              ["STRATEGY", liveMeta?.strategy ?? "—"],
-            ].map(([k, v]) => (
-              <span key={k} style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
-                {k}: <span style={{ color: "var(--text-secondary)" }}>{v}</span>
-              </span>
-            ))}
-            <Divider />
-            <Tag minimal intent={Intent.SUCCESS}>INDEX ONLINE</Tag>
-          </>
+              `hits: ${queryState === "results" ? String(liveMeta?.totalHits ?? results.length) : "—"}`,
+              `latency: ${queryState === "results" && liveMeta ? `${liveMeta.latencyMs}ms` : "—"}`,
+              `index: ${liveMeta?.indexVersion ?? "—"}`,
+              `strategy: ${liveMeta?.strategy ?? "—"}`,
+            ].join("  ·  ")}
+            <span style={{ color: "var(--status-nominal)", marginLeft: 10 }}>● online</span>
+          </span>
         )}
       </div>
     </div>

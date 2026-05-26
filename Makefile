@@ -121,11 +121,19 @@ validate: ## Check env file, LM Studio, Qdrant, and Neo4j connectivity
 		printf "$(GREEN)$(BOLD)All checks passed$(NC)\n"; \
 	'
 
-up: ## Start shared infrastructure and API/UI services
-	@docker compose -f docker-compose.local.yml up -d
+up: ## Start Neo4j + Qdrant (Docker if available, else native binaries via shell/start_services.sh)
+	@if docker info >/dev/null 2>&1; then \
+		docker compose -f docker-compose.local.yml up -d; \
+	else \
+		bash shell/start_services.sh; \
+	fi
 
-down: ## Stop shared infrastructure and API/UI services
-	@docker compose -f docker-compose.local.yml down
+down: ## Stop Neo4j + Qdrant (Docker if available, else shell/stop_services.sh)
+	@if docker info >/dev/null 2>&1; then \
+		docker compose -f docker-compose.local.yml down; \
+	else \
+		bash shell/stop_services.sh; \
+	fi
 
 serve: ## Start the reasoning agent in interactive CLI mode
 	@$(MAKE) --no-print-directory reasoning-run
