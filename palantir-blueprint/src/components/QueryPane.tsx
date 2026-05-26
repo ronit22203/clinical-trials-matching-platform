@@ -635,7 +635,7 @@ export default function QueryPane({
       >
         {clinicianMode ? (
           <span className="status-dot" style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
-            <span style={{ color: "var(--status-nominal)", marginRight: 5 }}>●</span>System ready
+            <span style={{ color: "var(--status-nominal)", marginRight: 5 }}>●</span>System online
           </span>
         ) : (
           <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>

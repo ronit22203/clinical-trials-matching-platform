@@ -14,15 +14,15 @@ export default function Navigation({ clinicianMode, onModeToggle }: NavigationPr
         </NavbarHeading>
         <NavbarDivider />
         <Tag minimal intent={Intent.SUCCESS} style={{ fontWeight: 400 }}>
-          System ready
+          System online
         </Tag>
-        <Tag minimal style={{ opacity: 0.6, fontWeight: 400 }}>v2026.05</Tag>
+        <Tag minimal style={{ opacity: 0.6, fontWeight: 400 }}>1.0</Tag>
       </NavbarGroup>
       <NavbarGroup align="right">
         <Button
           minimal
           small
-          icon={clinicianMode ? "settings" : "person"}
+          icon={clinicianMode ? "settings" : "pulse"}
           text={clinicianMode ? "Audit View" : "Clinical View"}
           onClick={onModeToggle}
           style={{ fontFamily: "var(--text-mono)", fontSize: 10, letterSpacing: "0.04em" }}
