@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import clsx from "clsx";
 
 import Navigation from "./components/Navigation";
+import LeftPane from "./components/LeftPane";
+import type { QueryHistoryItem, PatientRecord } from "./components/LeftPane";
 import QueryPane from "./components/QueryPane";
 import IngestionPane from "./components/IngestionPane";
 
@@ -14,6 +16,10 @@ export default function App() {
   const [paneWidth, setPaneWidth]       = useState(PANE_DEFAULT);
   const [collapsed, setCollapsed]       = useState(false);
   const [dragging, setDragging]         = useState(false);
+  // Session history + patient context
+  const [history, setHistory]           = useState<QueryHistoryItem[]>([]);
+  const [patientRecord, setRecord]      = useState<PatientRecord>({ name: "", mrn: "", dob: "", chief: "", allergies: "", meds: "" });
+  const [externalFill, setExternalFill] = useState<string | undefined>(undefined);
   const dragStartX  = useRef(0);
   const dragStartW  = useRef(0);
 
@@ -40,6 +46,17 @@ export default function App() {
     };
   }, [dragging]);
 
+  function handleQueryComplete(query: string, hitCount: number) {
+    setHistory((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, query, ts: Date.now(), hitCount },
+    ]);
+  }
+
+  function handleSelectHistory(q: string) {
+    setExternalFill(q);
+  }
+
   return (
     <div
       className={clsx("app-root")}
@@ -55,7 +72,17 @@ export default function App() {
     >
       <Navigation clinicianMode={clinicianMode} onModeToggle={() => setClinicalMode((v) => !v)} />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        <QueryPane clinicianMode={clinicianMode} />
+        <LeftPane
+          history={history}
+          onSelect={handleSelectHistory}
+          record={patientRecord}
+          onUpdateRecord={setRecord}
+        />
+        <QueryPane
+          clinicianMode={clinicianMode}
+          externalFill={externalFill}
+          onQueryComplete={handleQueryComplete}
+        />
 
         {/* Drag handle + collapse toggle */}
         <div

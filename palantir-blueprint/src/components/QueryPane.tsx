@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Button,
   Callout,
@@ -12,8 +12,6 @@ import {
   NonIdealState,
   Popover,
   Pre,
-  Tab,
-  Tabs,
   Tag,
 } from "@blueprintjs/core";
 import KnowledgeGraph from "./KnowledgeGraph";
@@ -195,7 +193,15 @@ function ResultCard({
 
 // ─── Main component ───────────────────────────────────────────
 
-export default function QueryPane({ clinicianMode }: { clinicianMode: boolean }) {
+export default function QueryPane({
+  clinicianMode,
+  externalFill,
+  onQueryComplete,
+}: {
+  clinicianMode: boolean;
+  externalFill?: string;
+  onQueryComplete?: (query: string, hitCount: number) => void;
+}) {
   const [query, setQuery]               = useState("");
   const [expandedResult, setExpanded]   = useState<string | number | null>(null);
   const [displayCount, setDisplayCount] = useState(3);
@@ -203,8 +209,19 @@ export default function QueryPane({ clinicianMode }: { clinicianMode: boolean })
   const [activeFilters, setActiveFilters] = useState<{ phase: string[]; status: string[]; strategy: string[] }>({
     phase: [], status: [], strategy: [],
   });
-  const [activeTab, setActiveTab]       = useState<string>("results");
   const [highlightedNct, setHighlighted] = useState<string | null>(null);
+
+  // Vertical split: top (results) / bottom (provenance + graph)
+  const [splitPct, setSplitPct]   = useState(60);
+  const [vDragging, setVDragging] = useState(false);
+  const vDragStartY               = useRef(0);
+  const vDragStartPct             = useRef(60);
+  const contentRef                = useRef<HTMLDivElement>(null);
+  // Track executed query for onQueryComplete notification
+  const lastRanQuery              = useRef<string>("");
+  const lastNotifiedQ             = useRef<string>("");
+  // Track last external fill to avoid re-firing on same value
+  const lastExternalFill          = useRef<string | undefined>(undefined);
 
   // Live API state via polling hook
   const {
@@ -222,6 +239,7 @@ export default function QueryPane({ clinicianMode }: { clinicianMode: boolean })
   function runQuery() {
     const q = query.trim();
     if (!q) return;
+    lastRanQuery.current = q;
     setExpanded(null);
     setDisplayCount(3);
     setHighlighted(null);
@@ -246,8 +264,55 @@ export default function QueryPane({ clinicianMode }: { clinicianMode: boolean })
   }
 
   function handleGraphTrialClick(nctId: string) {
-    setActiveTab("results");
     setHighlighted(nctId);
+  }
+
+  // ── Effects ──────────────────────────────────────────────────
+
+  // Vertical split drag
+  useEffect(() => {
+    if (!vDragging) return;
+    function onMove(e: MouseEvent) {
+      const h = contentRef.current?.offsetHeight ?? 600;
+      const delta = e.clientY - vDragStartY.current;
+      const next = Math.min(80, Math.max(20, vDragStartPct.current + (delta / h) * 100));
+      setSplitPct(next);
+    }
+    function onUp() { setVDragging(false); }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [vDragging]);
+
+  // Prefill search input when a history item is selected
+  useEffect(() => {
+    if (externalFill !== undefined && externalFill !== lastExternalFill.current) {
+      lastExternalFill.current = externalFill;
+      if (externalFill) setQuery(externalFill);
+    }
+  }, [externalFill]);
+
+  // Notify parent once per query when results arrive
+  useEffect(() => {
+    if (
+      queryState === "results" &&
+      lastRanQuery.current &&
+      lastRanQuery.current !== lastNotifiedQ.current
+    ) {
+      lastNotifiedQ.current = lastRanQuery.current;
+      onQueryComplete?.(lastRanQuery.current, liveResults.length);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryState, liveResults.length]);
+
+  function onVDragStart(e: React.MouseEvent) {
+    e.preventDefault();
+    vDragStartY.current    = e.clientY;
+    vDragStartPct.current  = splitPct;
+    setVDragging(true);
   }
 
   const results        = filteredResults();
@@ -398,8 +463,6 @@ export default function QueryPane({ clinicianMode }: { clinicianMode: boolean })
     );
   }
 
-  const resultCount = queryState === "results" ? results.length : 0;
-
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
 
@@ -509,27 +572,55 @@ export default function QueryPane({ clinicianMode }: { clinicianMode: boolean })
         </div>
       )}
 
-      {/* Tab content */}
-      <div style={{ flex: 1, overflow: "auto", padding: "10px 14px 14px" }}>
-        {clinicianMode ? (
-          /* clinicianMode: single RESULTS panel, no visible tab strip */
+      {/* Resizable split: results (top) | provenance + graph (bottom) */}
+      <div
+        ref={contentRef}
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          minHeight: 0,
+          cursor: vDragging ? "row-resize" : undefined,
+          userSelect: vDragging ? "none" : undefined,
+        }}
+      >
+
+        {/* Top: Results */}
+        <div style={{ flex: splitPct, overflow: "auto", padding: "10px 14px 14px", minHeight: 0 }}>
           <ResultsPanel />
-        ) : (
-          <Tabs
-            id="result-tabs"
-            selectedTabId={activeTab}
-            onChange={(id) => setActiveTab(id as string)}
-            renderActiveTabPanelOnly
-          >
-            <Tab
-              id="results"
-              title={resultCount > 0 ? `RESULTS (${resultCount})` : "RESULTS"}
-              panel={<ResultsPanel />}
-            />
-            <Tab id="provenance" title="PROVENANCE" panel={<ProvenancePanel />} />
-            <Tab id="kg"         title="ENTITY GRAPH" panel={<GraphPanel />} />
-          </Tabs>
-        )}
+        </div>
+
+        {/* Vertical drag handle */}
+        <div className="v-split-handle" onMouseDown={onVDragStart}>
+          <div className="v-split-line" />
+          <div className="v-split-grip">···</div>
+        </div>
+
+        {/* Bottom: Provenance | Entity Graph */}
+        <div style={{ flex: 100 - splitPct, display: "flex", overflow: "hidden", minHeight: 0 }}>
+
+          {/* Provenance half */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--border)" }}>
+            <div style={{ padding: "4px 12px 3px", borderBottom: "1px solid var(--border-dim)", background: "var(--surface-1)", flexShrink: 0 }}>
+              <span className="section-label" style={{ margin: 0 }}>PROVENANCE</span>
+            </div>
+            <div style={{ flex: 1, overflow: "auto", padding: "8px 12px 12px" }}>
+              <ProvenancePanel />
+            </div>
+          </div>
+
+          {/* Entity Graph half */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div style={{ padding: "4px 12px 3px", borderBottom: "1px solid var(--border-dim)", background: "var(--surface-1)", flexShrink: 0 }}>
+              <span className="section-label" style={{ margin: 0 }}>ENTITY GRAPH</span>
+            </div>
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <GraphPanel />
+            </div>
+          </div>
+
+        </div>
       </div>
 
       {/* Status bar — lean */}
