@@ -171,3 +171,12 @@ export function fetchCleanArtifact(slug: string): Promise<BackendArtifactPreview
 export function getOcrVizUrl(slug: string, page: number): string {
   return `${INGEST_BASE}/api/ingest/artifacts/ocr-viz/${slug}/${page}`;
 }
+
+/**
+ * Returns the URL to serve a source PDF by filename.
+ * Backend: GET /api/ingest/artifacts/pdf?source={filename}
+ * Searches data/pdfs/raw/ and data/pdfs/raw/upload/ for the matching file.
+ */
+export function getPdfSourceUrl(source: string): string {
+  return `${INGEST_BASE}/api/ingest/artifacts/pdf?source=${encodeURIComponent(source)}`;
+}

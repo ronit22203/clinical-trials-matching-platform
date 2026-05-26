@@ -15,9 +15,18 @@ import {
   Spinner,
   Tag,
 } from "@blueprintjs/core";
+import { Document, Page, pdfjs } from "react-pdf";
+import "react-pdf/dist/Page/TextLayer.css";
+import "react-pdf/dist/Page/AnnotationLayer.css";
 import { startIngestStream, fetchChunks, fetchMarkdownArtifact, fetchCleanArtifact, getOcrVizUrl } from "../lib/api";
 import { adaptChunk } from "../lib/adapters";
 import type { UIChunk } from "../lib/adapters";
+
+// Share the same worker config as QueryPane (idempotent assignment)
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).toString();
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -242,6 +251,79 @@ function MarkdownDiff({ rawOcrText, cleanedMarkdown }: { rawOcrText: string; cle
 }
 
 // ─── Main component ───────────────────────────────────────────
+
+/** Page-1 thumbnail + file metadata shown before ingestion starts. */
+function PdfPreview({ file, onStart, clinicianMode }: { file: File; onStart: () => void; clinicianMode: boolean }) {
+  const [pageCount, setPageCount] = useState<number | null>(null);
+  return (
+    <div className="pdf-preview-card">
+      <div className="pdf-preview-thumb">
+        <Document
+          file={file}
+          onLoadSuccess={({ numPages }) => setPageCount(numPages)}
+          loading={
+            <div style={{ width: 160, height: 210, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--surface-2)" }}>
+              <Spinner size={20} />
+            </div>
+          }
+          error={
+            <div style={{ width: 160, height: 210, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--surface-2)", fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
+              No preview
+            </div>
+          }
+        >
+          <Page pageNumber={1} width={160} renderTextLayer={false} renderAnnotationLayer={false} />
+        </Document>
+      </div>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontFamily: "var(--text-mono)", fontSize: 11, color: "var(--text-primary)", marginBottom: 3, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {file.name}
+        </div>
+        <div style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
+          {(file.size / 1024).toFixed(0)} KB{pageCount != null ? ` · ${pageCount} page${pageCount !== 1 ? "s" : ""}` : ""}
+        </div>
+      </div>
+      <Button intent={Intent.PRIMARY} icon={clinicianMode ? "upload" : "play"} onClick={onStart}>
+        {clinicianMode ? "Upload & Process" : "Start Ingestion"}
+      </Button>
+    </div>
+  );
+}
+
+/** Collapsed chunk summary. Audit view (engineer mode only) expands individual cards. */
+function ChunkSummary({ chunks, clinicianMode }: { chunks: Chunk[]; clinicianMode: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const pages = chunks.map((c) => c.page).filter((p) => p > 0);
+  const minPage = pages.length ? Math.min(...pages) : 1;
+  const maxPage = pages.length ? Math.max(...pages) : 1;
+  const pageRange = minPage === maxPage ? `p.${minPage}` : `p.${minPage}–${maxPage}`;
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: expanded ? 8 : 0 }}>
+        <Tag minimal intent={Intent.PRIMARY} style={{ fontFamily: "var(--text-mono)", fontSize: 10 }}>
+          {chunks.length} chunk{chunks.length !== 1 ? "s" : ""} · {pageRange}
+        </Tag>
+        {!clinicianMode && (
+          <Button
+            minimal small
+            icon={expanded ? "chevron-up" : "chevron-down"}
+            text={expanded ? "Collapse" : "Audit view"}
+            onClick={() => setExpanded((v) => !v)}
+            style={{ fontFamily: "var(--text-mono)", fontSize: 10 }}
+          />
+        )}
+      </div>
+      {expanded && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+          {chunks.map((chunk) => (
+            <ChunkCard key={chunk.id} chunk={chunk} clinicianMode={clinicianMode} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function IngestionPane({ clinicianMode }: { clinicianMode: boolean }) {
   const [running, setRunning]             = useState(false);
@@ -520,20 +602,7 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
         {/* Idle state */}
         {!running && !done && logLines.length === 0 && (
           selectedFile ? (
-            <NonIdealState
-              icon="document"
-              title={selectedFile.name}
-              description={
-                clinicianMode
-                  ? "Document ready. Press Upload & Process to begin."
-                  : `PDF selected (${(selectedFile.size / 1024).toFixed(0)} KB). Press Start Ingestion to begin.`
-              }
-              action={
-                <Button intent={Intent.PRIMARY} icon={clinicianMode ? "upload" : "play"} onClick={startIngestion}>
-                  {clinicianMode ? "Upload & Process" : "Start Ingestion"}
-                </Button>
-              }
-            />
+            <PdfPreview file={selectedFile} onStart={startIngestion} clinicianMode={clinicianMode} />
           ) : (
             <NonIdealState
               icon={clinicianMode ? "document" : "cloud-upload"}
@@ -665,9 +734,7 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {liveChunks.length > 0
-                  ? liveChunks.map((chunk) => (
-                      <ChunkCard key={chunk.id} chunk={chunk} clinicianMode={clinicianMode} />
-                    ))
+                  ? <ChunkSummary chunks={liveChunks} clinicianMode={clinicianMode} />
                   : (
                     <NonIdealState
                       icon="layers"

@@ -402,3 +402,27 @@ async def artifact_kg_graph(slug: str) -> JSONResponse:
         "nodes": list(node_map.values()),
         "links": links,
     })
+
+
+@app.get("/api/ingest/artifacts/pdf")
+async def serve_source_pdf(source: str) -> FileResponse:
+    """Serve a source PDF by name for the provenance viewer.
+
+    `source` may be a bare filename (e.g. 'study.pdf') or a relative path.
+    Searches UPLOAD_DIR and data/pdfs/raw/ for the matching file.
+    """
+    name = Path(source).name
+    search_dirs = [
+        UPLOAD_DIR,
+        _REPO_ROOT / "data" / "pdfs" / "raw",
+    ]
+    for search_dir in search_dirs:
+        if search_dir.exists():
+            for pdf_path in search_dir.rglob(name):
+                if pdf_path.is_file() and pdf_path.suffix.lower() == ".pdf":
+                    return FileResponse(
+                        str(pdf_path),
+                        media_type="application/pdf",
+                        headers={"Access-Control-Allow-Origin": "*"},
+                    )
+    raise HTTPException(status_code=404, detail=f"PDF not found: {source}")

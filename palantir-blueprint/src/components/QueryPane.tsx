@@ -14,9 +14,19 @@ import {
   Pre,
   Tag,
 } from "@blueprintjs/core";
+import { Document, Page, pdfjs } from "react-pdf";
+import "react-pdf/dist/Page/TextLayer.css";
+import "react-pdf/dist/Page/AnnotationLayer.css";
 import KnowledgeGraph from "./KnowledgeGraph";
 import { useQueryPoll } from "../lib/useQueryPoll";
+import { getPdfSourceUrl } from "../lib/api";
 import type { TrialResult, ProvenanceSource } from "../lib/adapters";
+
+// Configure PDF.js worker (served from node_modules via Vite's new URL() bundling)
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).toString();
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -50,6 +60,47 @@ function confHighlightStyle(conf: number): React.CSSProperties {
 
 // ─── Sub-components ───────────────────────────────────────────
 
+/** Inline PDF page viewer with optional page navigation. */
+function PdfViewer({ url, page }: { url: string; page: number }) {
+  const [numPages, setNumPages]   = useState<number | null>(null);
+  const [currentPage, setPage]    = useState(page);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  return (
+    <div className="pdf-viewer-container">
+      {loadError ? (
+        <div className="pdf-viewer-error">PDF unavailable — {loadError}</div>
+      ) : (
+        <>
+          <Document
+            file={url}
+            onLoadSuccess={({ numPages: n }) => setNumPages(n)}
+            onLoadError={(err) => setLoadError(err.message)}
+            loading={<div className="pdf-viewer-error">Loading PDF…</div>}
+          >
+            <Page
+              pageNumber={currentPage}
+              width={380}
+              renderTextLayer
+              renderAnnotationLayer={false}
+            />
+          </Document>
+          {numPages && numPages > 1 && (
+            <div className="pdf-viewer-nav">
+              <Button minimal small icon="chevron-left" disabled={currentPage <= 1}
+                onClick={() => setPage((p) => p - 1)} />
+              <span style={{ fontFamily: "var(--text-mono)", fontSize: 9, color: "var(--text-dim)" }}>
+                {currentPage} / {numPages}
+              </span>
+              <Button minimal small icon="chevron-right" disabled={currentPage >= numPages}
+                onClick={() => setPage((p) => p + 1)} />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function SkeletonCard() {
   return (
     <Card elevation={Elevation.ONE} style={{ padding: "10px 14px" }}>
@@ -70,10 +121,12 @@ function SkeletonCard() {
 }
 
 function ProvenanceChunk({ prov, clinicianMode }: { prov: ProvenanceSource; clinicianMode: boolean }) {
+  const [showPdf, setShowPdf] = useState(false);
   const borderColor = prov.conf >= 0.9 ? "rgba(106,158,196,0.6)" : prov.conf >= 0.8 ? "rgba(196,130,90,0.55)" : "rgba(201,123,110,0.5)";
   const metaFields = clinicianMode
     ? ([["SOURCE", prov.source], ["PAGE", prov.page]] as [string, string][])
     : ([["SOURCE", prov.source], ["BYTES", prov.byteRange], ["PAGE", prov.page], ["CONF", prov.conf.toFixed(2)]] as [string, string][]);
+  const pageNum = parseInt(prov.page) || 1;
   return (
     <div
       style={{
@@ -101,13 +154,20 @@ function ProvenanceChunk({ prov, clinicianMode }: { prov: ProvenanceSource; clin
           </span>
         ))}
       </Pre>
-      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
         {!clinicianMode && <Tag minimal intent={scoreIntent(prov.conf)}>conf {prov.conf.toFixed(2)}</Tag>}
         <Tag minimal>{(prov.source.split(".").pop() ?? "file").toUpperCase()}</Tag>
         <Tag minimal intent={prov.conf >= 0.9 ? Intent.PRIMARY : prov.conf >= 0.8 ? Intent.WARNING : Intent.DANGER}>
           {prov.conf >= 0.9 ? "high confidence" : prov.conf >= 0.8 ? "medium confidence" : "low confidence"}
         </Tag>
+        <Button
+          minimal small icon="document-open"
+          text={showPdf ? "Close PDF" : "View in PDF"}
+          onClick={() => setShowPdf((v) => !v)}
+          style={{ marginLeft: "auto", fontFamily: "var(--text-mono)", fontSize: 10 }}
+        />
       </div>
+      {showPdf && <PdfViewer url={getPdfSourceUrl(prov.source)} page={pageNum} />}
     </div>
   );
 }
@@ -598,7 +658,7 @@ export default function QueryPane({
         </div>
 
         {/* Bottom: Provenance | Entity Graph */}
-        <div style={{ flex: 100 - splitPct, display: "flex", overflow: "hidden", minHeight: 0 }}>
+        <div style={{ flex: 100 - splitPct, display: "flex", overflow: "hidden", minHeight: 0, pointerEvents: vDragging ? "none" : undefined }}>
 
           {/* Provenance half */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--border)" }}>
