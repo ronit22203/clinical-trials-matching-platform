@@ -226,10 +226,14 @@ export function adaptSubgraphNode(
   total: number
 ): GraphNode {
   const { x, y } = circularLayout(total, index);
+  // tier 1 = the queried root entity, tier 2 = 1-hop neighbours
   const type: NodeType = node.tier === 1 ? "condition" : "medication";
   return {
     id: node.id,
-    label: node.label,
+    // node.id is the entity name (e.g. "HEPARIN"); node.label is the Neo4j
+    // label type (always "Entity" in this schema) — display the name, not the type.
+    label: node.id,
+    sublabel: node.tier === 1 ? "root" : undefined,
     type,
     x,
     y,

@@ -297,7 +297,7 @@ export default function KnowledgeGraph({ onTrialClick, highlightedNct, nodes: pr
                   fontFamily="monospace"
                   style={{ pointerEvents: "none" }}
                 >
-                  {node.label}
+                  {node.label.length > 14 ? node.label.slice(0, 13) + "…" : node.label}
                 </text>
               </g>
             );

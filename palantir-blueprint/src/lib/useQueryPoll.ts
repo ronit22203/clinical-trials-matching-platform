@@ -85,7 +85,13 @@ export function useQueryPoll(): UseQueryPollResult {
       // Fire synthesis and subgraph enrichment in parallel (both non-fatal)
       setSynthesisLoading(true);
 
-      const topEntity = res.matches[0]?.evidence[0]?.head;
+      // Prefer head entity from graph facts (always populated when Neo4j has data);
+      // fall back to inline evidence and then to the first meaningful query keyword.
+      const _factHeadRe = /^(.+?)\s+--\[/;
+      const topEntity =
+        (res.graphFacts[0] ? _factHeadRe.exec(res.graphFacts[0].trim())?.[1]?.trim() : undefined) ??
+        res.matches[0]?.evidence[0]?.head ??
+        query.trim().split(/\s+/).find((w) => w.length > 3);
 
       const [synthResult] = await Promise.allSettled([
         fetchSynthesis(query, res.matches),
