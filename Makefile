@@ -14,10 +14,18 @@ ACQUISITION_DIR := data-acquisition
 INGESTION_DIR   := data-ingestion
 BENCHMARKING_DIR := benchmarking
 BLUEPRINT_DIR   := palantir-blueprint
+INFERENCE_DIR   := core-llm-inference
 CONFIG_FILE     := config/app.yaml
 
-REASONING_PYTHON := .venv/bin/python
+REASONING_PYTHON   := .venv/bin/python
 ACQUISITION_PYTHON := .venv/bin/python
+INFERENCE_CLI      := $(INFERENCE_DIR)/.venv/bin/core-llm-inference
+INFERENCE_PYTHON   := $(INFERENCE_DIR)/.venv/bin/python
+
+# Inference server defaults (override via env or CLI)
+INFERENCE_MODEL ?= Qwen/Qwen2.5-7B-Instruct
+INFERENCE_PORT  ?= 30000
+INFERENCE_HOST  ?= 0.0.0.0
 
 SOURCE ?= medrxiv
 MAX_PDFS ?= 2
@@ -60,6 +68,8 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	deterministic-run _det-ingest-timed _det-graph-timed _det-finalize \
 	clean clean-all clean-artifacts clean-ocr clean-md clean-chunks clean-vectors clean-graph clean-hard \
 	dev \
+	inference-install inference-serve inference-serve-fg inference-stop \
+	inference-status inference-benchmark inference-benchmark-all \
 	reasoning-install reasoning-clean reasoning-test reasoning-run reasoning-run-query reasoning-serve \
 	reasoning-graphrag-up reasoning-graphrag-down \
 	reasoning-download-models reasoning-sglang-run reasoning-sglang-run-query \
@@ -430,6 +440,64 @@ reasoning-sglang-run: ## Run the reasoning CLI against SGLang (interactive)
 
 reasoning-sglang-run-query: ## Run one reasoning query against SGLang (QUERY=...)
 	@cd $(REASONING_DIR) && SGLANG_BASE_URL=http://localhost:30000/v1 $(REASONING_PYTHON) -m src query "$(QUERY)"
+
+# --- [ core-llm-inference — SGLang production inference ] ---------------------
+
+inference-install: ## Install core-llm-inference venv + torch cu124 + sglang[all] (L4/Ubuntu)
+	@printf "$(CYAN)Setting up core-llm-inference (.venv)…$(NC)\n"
+	@cd $(INFERENCE_DIR) && \
+		([ -d .venv ] || python3.12 -m venv .venv) && \
+		.venv/bin/pip install --quiet --upgrade pip && \
+		.venv/bin/pip install --quiet torch \
+			--extra-index-url https://download.pytorch.org/whl/cu124 && \
+		.venv/bin/pip install --quiet "sglang[all]" \
+			--find-links https://flashinfer.ai/whl/cu124/torch2.4/flashinfer/ \
+			--extra-index-url https://download.pytorch.org/whl/cu124 && \
+		.venv/bin/pip install --quiet -e .
+	@printf "$(GREEN)inference-install done. Run: make inference-serve$(NC)\n"
+
+inference-serve: ## Start SGLang inference server detached on :30000 (MODEL=..., PORT=...)
+	@printf "$(CYAN)Starting SGLang server: $(INFERENCE_MODEL) on :$(INFERENCE_PORT) (detached)$(NC)\n"
+	@$(INFERENCE_CLI) serve \
+		--model "$(INFERENCE_MODEL)" \
+		--host "$(INFERENCE_HOST)" \
+		--port "$(INFERENCE_PORT)" \
+		--detach
+	@printf "$(GREEN)Server starting → http://$(INFERENCE_HOST):$(INFERENCE_PORT)$(NC)\n"
+	@printf "$(YELLOW)Check status: make inference-status$(NC)\n"
+
+inference-serve-fg: ## Start SGLang inference server in foreground (Ctrl-C to stop)
+	@printf "$(CYAN)Starting SGLang server (foreground): $(INFERENCE_MODEL) on :$(INFERENCE_PORT)$(NC)\n"
+	@$(INFERENCE_CLI) serve \
+		--model "$(INFERENCE_MODEL)" \
+		--host "$(INFERENCE_HOST)" \
+		--port "$(INFERENCE_PORT)"
+
+inference-stop: ## Stop background SGLang inference server (kills sglang.launch_server)
+	@printf "$(YELLOW)Stopping SGLang server…$(NC)\n"
+	@pkill -f "sglang.launch_server" 2>/dev/null \
+		&& printf "$(GREEN)SGLang server stopped.$(NC)\n" \
+		|| printf "$(YELLOW)No running SGLang server found.$(NC)\n"
+
+inference-status: ## Check inference server health, loaded model, GPU stats
+	@$(INFERENCE_CLI) status --url "http://$(INFERENCE_HOST):$(INFERENCE_PORT)" --cache
+
+inference-benchmark: ## Benchmark inference (N=10 queries, default category mix)
+	@printf "$(CYAN)Benchmarking inference server (N=$(N) queries)…$(NC)\n"
+	@$(INFERENCE_CLI) benchmark \
+		--url "http://$(INFERENCE_HOST):$(INFERENCE_PORT)" \
+		--queries "$(N)" \
+		--warmup \
+		--gpu l4
+
+inference-benchmark-all: ## Benchmark with all queries + Prometheus push
+	@printf "$(CYAN)Full benchmark run — all queries, warmup enabled…$(NC)\n"
+	@$(INFERENCE_CLI) benchmark \
+		--url "http://$(INFERENCE_HOST):$(INFERENCE_PORT)" \
+		--all-queries \
+		--warmup \
+		--gpu l4 \
+		--prometheus
 
 acquisition-install: ## Create acquisition venv if needed and install editable package
 	@cd $(ACQUISITION_DIR) && \
