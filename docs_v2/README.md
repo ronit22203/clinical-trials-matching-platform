@@ -6,7 +6,8 @@
 
 | Document | Description |
 |----------|-------------|
-| [Quickstart](quickstart.md) | Prerequisites, installation, and first run |
+| [Quickstart](quickstart.md) | Prerequisites, installation, and first run (macOS / local dev) |
+| [Production Startup](prod-startup.md) | Ubuntu 22.04 + NVIDIA L4 — SGLang, native Neo4j/Qdrant, no Docker |
 | [Architecture](architecture.md) | System design, module topology, data flow |
 | [Data Pipeline](data-pipeline.md) | Six-stage ingestion pipeline reference |
 | [Agent Framework](agent-framework.md) | LangGraph ReAct runtime and tool plugin system |
