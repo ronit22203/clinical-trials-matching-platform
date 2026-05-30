@@ -1,0 +1,3 @@
+[submodule "core-llm-inference"]
+	path = core-llm-inference
+	url = https://github.com/ronit22203/core-llm-inference
