@@ -74,6 +74,9 @@ if command -v python3.12 >/dev/null 2>&1; then
   ok "python3.12 already installed: $(python3.12 --version)"
 else
   info "Adding deadsnakes PPA (direct GPG import — bypasses add-apt-repository which requires python3-apt, absent in minimal RunPod images)…"
+  # Purge ALL pre-existing deadsnakes entries (old-style without Signed-By, or from prior runs)
+  # to prevent "Conflicting values set for option Signed-By" apt error.
+  rm -f /etc/apt/sources.list.d/*deadsnakes* /etc/apt/trusted.gpg.d/deadsnakes* 2>/dev/null || true
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF23C5A6CF475977595C89F51BA6932366A755776" \
     | gpg --dearmor -o /etc/apt/keyrings/deadsnakes.gpg
