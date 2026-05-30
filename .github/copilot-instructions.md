@@ -10,8 +10,10 @@ Monorepo for a local-first clinical research AI platform. Three active Python mo
 | `data-acquisition/` | Multi-source PDF fetcher (ClinicalTrials.gov, PubMed, bioRxiv, medRxiv) with multi-cloud storage | Python 3.12+ |
 | `data-ingestion/` | 5-stage document pipeline: PDF → OCR → Markdown → Clean → Chunk → Embed (Qdrant + Neo4j) | Python 3.11.14 |
 | `simple-ui/` | Standalone HTML/JS/CSS frontend; no build step | Static |
+| `palantir-blueprint/` | Vite + React + TypeScript production UI (Blueprint components) | Node 18+ |
+| `core-llm-inference/` | SGLang production inference server (GPU, RTX 5080 / L4) | Python 3.12+ |
 
-End-to-end flow: `data-acquisition` fetches PDFs → `data-ingestion` processes them into Qdrant vectors + Neo4j graph → `agentic-reasoning` queries both → `simple-ui` visualises results.
+End-to-end flow: `data-acquisition` fetches PDFs → `data-ingestion` processes them into Qdrant vectors + Neo4j graph → `agentic-reasoning` queries both → `simple-ui` / `palantir-blueprint` visualises results.
 
 ---
 
@@ -95,16 +97,63 @@ make deterministic-run BENCH_PDF=data/pdfs/my.pdf BENCH_RUNS=5
 make benchmark-retrieval RERANKER_MODEL="BAAI/bge-reranker-base"
 ```
 
+### palantir-blueprint (React UI)
+
+```bash
+make blueprint-install                        # npm install
+make blueprint-dev                            # Vite dev server on :5173 (hot-reload)
+make blueprint-build                          # production build → palantir-blueprint/dist/
+make blueprint-preview                        # build + preview on :4173
+```
+
+### core-llm-inference (SGLang — GPU only)
+
+```bash
+make inference-install                        # create .venv + torch cu124 + sglang[all]
+make inference-serve                          # start detached SGLang server on :30000
+make inference-serve-fg                       # foreground (Ctrl-C to stop)
+make inference-stop                           # kill background server
+make inference-status                         # health + loaded model + GPU stats
+make inference-benchmark N=10                 # latency/throughput benchmark
+```
+
 ### Infrastructure
 
 ```bash
+make bootstrap                                # first-time: check deps + create .env.local
 make up                                       # start Neo4j + Qdrant (docker-compose.local.yml)
 make down
 make validate                                 # check LM Studio, Qdrant, Neo4j connectivity
 make status                                   # running containers + artifact counts
 
-make simple-ui-serve                          # serve simple-ui on localhost
+make dev                                      # ★ start all services: reasoning API :8000, ingestion API :8001, blueprint UI :5173
+make ingestion-api                            # ingestion FastAPI server on :8001 (standalone)
+make reasoning-serve                          # reasoning FastAPI server on :8000 (standalone)
+make simple-ui-serve                          # serve simple-ui on :3000
 ```
+
+### Cross-module tests (root `tests/`)
+
+```bash
+make test-suite                               # pytest tests/ -v (uses agentic-reasoning .venv)
+# Single test:
+agentic-reasoning/.venv/bin/python -m pytest tests/test_config_schema.py::TestIngestionConfig -v
+```
+
+### API Servers
+
+**agentic-reasoning** exposes a FastAPI server (`src/server.py`) on `:8000`:
+- `POST /api/match` — Phase 1: hybrid GraphRAG retrieval → matches JSON
+- `POST /api/synthesis` — Phase 2: LLM synthesis from cached evidence (can be called separately after `/api/match`)
+- `GET /api/verify` — snippet by byte range from clean artifact
+- `GET /api/stats` — latest benchmark run summary
+- `GET /api/pdf/{doi_path}` — stream a raw PDF
+- `GET /api/debug/heatmap` — sentence-level cosine similarity heatmap
+- `GET /api/debug/subgraph` — 1-hop Neo4j neighbourhood (D3 force graph)
+
+The `Agent` is a lazy-init singleton inside the server (initialised on first request, behind an `asyncio.Lock`). Do not import or construct `Agent` at module load time.
+
+**data-ingestion** exposes a FastAPI server (`src/api/server.py`) on `:8001`.
 
 ---
 
@@ -179,6 +228,16 @@ Each stage persists intermediate files for debugging (`make ingestion-inspect`).
 
 ## Key Conventions
 
+### Testing conventions
+
+**Agent tests** (`agentic-reasoning/tests/`) mock both `GraphRAGTool` and the LLM — no Qdrant, Neo4j, or LLM backend is required to run them. The key invariant under test: Phase 1 (GraphRAG) is always called before the LLM, regardless of the outcome.
+
+**Root cross-module tests** (`tests/`) use `agentic-reasoning`'s `.venv` and validate structural correctness:
+- `tests/test_config_schema.py` — validates all four sections of `config/app.yaml` (required keys, provider chain ordering, temperature bounds, etc.). Any change to the config schema must pass this suite.
+- The root `tests/conftest.py` exposes `app_config` and `repo_root` session fixtures.
+
+**data-acquisition integration tests** are skipped automatically when cloud credentials are absent (`pytest.skip()`). Always run `make acquisition-test` (adds `-m "not integration"`) to avoid failures in local environments.
+
 ### Python Environments
 
 - Each module has its own `.venv`; never share environments across modules.
@@ -205,8 +264,6 @@ Inherit `BaseExtractor` from `src/extractors/base.py` (must return `{'content': 
 ### Secrets and Env Vars
 
 Copy `.env.local.example` → `.env.local` at repo root. Module-level secrets are also in `{module}/.env` where applicable. API keys referenced by env var name in YAML (`auth.key: OPENFDA_API_KEY`). Never hardcode credentials.
-
-`data-acquisition` integration tests call `pytest.skip()` when cloud credentials are absent — run `make acquisition-test` (which adds `-m "not integration"`) to avoid failures without credentials.
 
 ### Benchmarking
 
