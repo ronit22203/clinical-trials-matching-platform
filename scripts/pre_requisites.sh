@@ -73,8 +73,12 @@ header "Python 3.12"
 if command -v python3.12 >/dev/null 2>&1; then
   ok "python3.12 already installed: $(python3.12 --version)"
 else
-  info "Adding deadsnakes PPA…"
-  DEBIAN_FRONTEND=noninteractive add-apt-repository -y ppa:deadsnakes/ppa
+  info "Adding deadsnakes PPA (direct GPG import — bypasses add-apt-repository which requires python3-apt, absent in minimal RunPod images)…"
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF23C5A6CF475977595C89F51BA6932366A755776" \
+    | gpg --dearmor -o /etc/apt/keyrings/deadsnakes.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/deadsnakes.gpg] https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu $(lsb_release -cs) main" \
+    > /etc/apt/sources.list.d/deadsnakes-ppa.list
   apt-get update -qq
   apt-get install -y -qq python3.12 python3.12-venv python3.12-dev
   ok "python3.12: $(python3.12 --version)"
