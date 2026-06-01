@@ -73,15 +73,30 @@ SGLANG_BASE_URL=http://localhost:30000/v1
 
 ### 0.4 Install module dependencies (if not already done by pre_requisites.sh)
 
+> **Storage pre-check:** `inference-install` and `ingestion-install` download several GB
+> of GPU wheels. If your root filesystem has less than 25 GB free, ensure `/workspace` is
+> mounted — both `make install-gpu-runtimes` and `bash scripts/pre_requisites.sh`
+> automatically redirect pip cache and temp to `/workspace` when that path exists.
+
+Use the split-install targets to control what gets installed:
+
 ```bash
-make reasoning-install     # agentic-reasoning .venv
-make acquisition-install   # data-acquisition .venv
-make ingestion-install     # data-ingestion (system python3.11)
-make inference-install     # core-llm-inference .venv + torch cu124 + sglang
+# Fast path — no GPU downloads (~2 min)
+make install-lightweight   # reasoning + acquisition + blueprint UI
+
+# GPU-heavy path — large torch/sglang/marker-pdf wheels (~15–20 min first run)
+# Pip cache + tmp auto-redirected to /workspace when mounted
+make install-gpu-runtimes  # inference (SGLang) + ingestion (OCR/Torch)
 ```
 
-`make inference-install` will take the longest (~10–15 min on first run — downloads ~4 GB of
-CUDA wheels).
+Or install components individually:
+
+```bash
+make reasoning-install     # agentic-reasoning .venv (python3.12)
+make acquisition-install   # data-acquisition .venv (python3.12)
+make ingestion-install     # data-ingestion .venv (python3.11) + torch + OCR stack
+make inference-install     # core-llm-inference .venv (python3.12) + torch cu124 + sglang
+```
 
 ---
 
@@ -252,6 +267,7 @@ make down             # stop Neo4j + Qdrant
 | Neo4j password error | Initial password not set | `neo4j-admin dbms set-initial-password <password>` |
 | `pre_requisites.sh` partial failure | Interrupted mid-run | Re-run — script is idempotent; check log output |
 | HuggingFace download stalls | Rate limit / no token | Set `HF_TOKEN=<token>` in `.env.local`; `export $(grep -v ^# .env.local \| xargs)` |
+| `No space left on device` or `Disk quota exceeded` during install | Root filesystem < 25 GB free; GPU wheels writing to root | Mount `/workspace` (RunPod: always available); `make install-gpu-runtimes` and `bash scripts/pre_requisites.sh` auto-redirect pip cache + tmp there |
 
 ---
 

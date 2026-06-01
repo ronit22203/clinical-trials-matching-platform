@@ -19,8 +19,16 @@ CONFIG_FILE     := config/app.yaml
 
 REASONING_PYTHON   := .venv/bin/python
 ACQUISITION_PYTHON := .venv/bin/python
+INGESTION_PYTHON   := .venv/bin/python
 INFERENCE_CLI      := $(INFERENCE_DIR)/.venv/bin/core-llm-inference
 INFERENCE_PYTHON   := $(INFERENCE_DIR)/.venv/bin/python
+
+# --- [ Workspace storage redirect ] -------------------------------------------
+# When /workspace is mounted (RunPod, Colab, etc.) redirect pip cache + tmp there
+# to avoid exhausting the small root overlay filesystem during GPU package installs.
+WORKSPACE         ?= $(if $(wildcard /workspace),/workspace,)
+PIP_CACHE_FLAGS   := $(if $(WORKSPACE),--cache-dir $(WORKSPACE)/pip-cache,)
+PIP_TMPDIR_EXPORT := $(if $(WORKSPACE),TMPDIR=$(WORKSPACE)/pip-tmp,)
 
 # Inference server defaults (override via env or CLI)
 INFERENCE_MODEL ?= Qwen/Qwen2.5-7B-Instruct
@@ -83,6 +91,7 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	ingestion-neo4j-build ingestion-neo4j-delete ingestion-neo4j-stats \
 	ingestion-list-documents ingestion-list-executions ingestion-compare-runs \
 	ingestion-clean ingestion-clean-all \
+	install-lightweight install-gpu-runtimes \
 	test-suite
 
 help: ## Show all root orchestration targets
@@ -156,7 +165,7 @@ dev: ## ★ Start all services: reasoning API (:8000), ingestion API (:8001), bl
 	@printf "  Press $(BOLD)Ctrl+C$(NC) to stop all services.\n\n"
 	@trap 'kill 0' INT; \
 	 (cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --port 8000 --reload 2>&1 | sed 's/^/[reasoning] /') & \
-	 (cd $(INGESTION_DIR) && python3 -m uvicorn src.api.server:app --port 8001 --reload 2>&1 | sed 's/^/[ingestion] /') & \
+	 (cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m uvicorn src.api.server:app --port 8001 --reload 2>&1 | sed 's/^/[ingestion] /') & \
 	 (cd $(BLUEPRINT_DIR) && npm run dev 2>&1 | sed 's/^/[blueprint] /') & \
 	 wait
 
@@ -165,7 +174,7 @@ fetch: acquisition-fetch ## Fetch PDFs via data-acquisition
 ingest: ## Run ingestion pipeline then build knowledge graph (N=<max-pdfs>)
 	@printf "$(BLUE)Starting Ingestion Pipeline (N=$(N))...$(NC)\n"
 	@cd $(INGESTION_DIR) && \
-		python3 scripts/run_pipeline.py --config ../$(CONFIG_FILE) --max-pdfs "$(N)" --skip-graph $(if $(SKIP),--skip-$(SKIP),)
+		$(INGESTION_PYTHON) scripts/run_pipeline.py --config ../$(CONFIG_FILE) --max-pdfs "$(N)" --skip-graph $(if $(SKIP),--skip-$(SKIP),)
 	@printf "$(BLUE)Building Neo4j knowledge graph...$(NC)\n"
 	@$(MAKE) --no-print-directory ingestion-neo4j-build
 	@printf "$(GREEN)$(BOLD)Ingestion complete.$(NC)\n"
@@ -176,7 +185,7 @@ benchmark-sepsis: ## Run the Sepsis Falsification paper through the full pipelin
 	 mkdir -p data/pdfs/benchmarks; \
 	 cp "$$SPDF" data/pdfs/benchmarks/sepsis_falsification.pdf; \
 	 printf "$(YELLOW)Running Falsification Benchmark on Sepsis Models...$(NC)\n"; \
-	 cd $(INGESTION_DIR) && python3 scripts/run_pipeline.py --config ../$(CONFIG_FILE) \
+	 cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/run_pipeline.py --config ../$(CONFIG_FILE) \
 		--input-dir ../data/pdfs/benchmarks --skip-graph
 	@$(MAKE) --no-print-directory ingestion-neo4j-build
 	@$(MAKE) --no-print-directory reasoning-run-query \
@@ -304,7 +313,7 @@ deterministic-run: ## ★ Full deterministic pipeline → single manifest.json (
 
 _det-ingest-timed: ## [internal] Run ingestion pipeline on the golden PDF, record elapsed time
 	@T0=$$(date +%s); \
-	 cd $(INGESTION_DIR) && python3 scripts/run_pipeline.py \
+	 cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/run_pipeline.py \
 	     --config ../$(CONFIG_FILE) \
 	     --input-dir "../$(BENCH_PDF_DIR)" \
 	     --max-pdfs 1 \
@@ -317,7 +326,7 @@ _det-ingest-timed: ## [internal] Run ingestion pipeline on the golden PDF, recor
 
 _det-graph-timed: ## [internal] Build Neo4j KG from chunks, record elapsed time
 	@T0=$$(date +%s); \
-	 cd $(INGESTION_DIR) && python3 scripts/build_knowledge_graph.py \
+	 cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/build_knowledge_graph.py \
 	     --config ../$(CONFIG_FILE); \
 	 T1=$$(date +%s); ELAPSED=$$((T1-T0)); \
 	 printf '{"stage":"graph","elapsed_s":%d}\n' "$$ELAPSED" \
@@ -374,7 +383,7 @@ clean-graph: ingestion-neo4j-delete ## Delete all Neo4j graph data
 
 reasoning-install: ## Create reasoning venv if needed and install editable package
 	@cd $(REASONING_DIR) && \
-		([ -x $(REASONING_PYTHON) ] || python3 -m venv .venv) && \
+		([ -x $(REASONING_PYTHON) ] || python3.12 -m venv .venv) && \
 		$(REASONING_PYTHON) -m pip install -e .
 
 reasoning-clean: ## Remove reasoning caches and logs
@@ -445,12 +454,15 @@ reasoning-sglang-run-query: ## Run one reasoning query against SGLang (QUERY=...
 
 inference-install: ## Install core-llm-inference venv + torch cu124 + sglang[all] (L4/Ubuntu)
 	@printf "$(CYAN)Setting up core-llm-inference (.venv)…$(NC)\n"
+	$(if $(WORKSPACE),@mkdir -p $(WORKSPACE)/pip-cache $(WORKSPACE)/pip-tmp,)
 	@cd $(INFERENCE_DIR) && \
 		([ -d .venv ] || python3.12 -m venv .venv) && \
 		.venv/bin/pip install --quiet --upgrade pip && \
-		.venv/bin/pip install --quiet torch \
+		$(PIP_TMPDIR_EXPORT) .venv/bin/pip install --quiet torch \
+			$(PIP_CACHE_FLAGS) \
 			--extra-index-url https://download.pytorch.org/whl/cu124 && \
-		.venv/bin/pip install --quiet "sglang[all]" \
+		$(PIP_TMPDIR_EXPORT) .venv/bin/pip install --quiet "sglang[all]" \
+			$(PIP_CACHE_FLAGS) \
 			--find-links https://flashinfer.ai/whl/cu124/torch2.4/flashinfer/ \
 			--extra-index-url https://download.pytorch.org/whl/cu124 && \
 		.venv/bin/pip install --quiet -e .
@@ -501,7 +513,7 @@ inference-benchmark-all: ## Benchmark with all queries + Prometheus push
 
 acquisition-install: ## Create acquisition venv if needed and install editable package
 	@cd $(ACQUISITION_DIR) && \
-		([ -x $(ACQUISITION_PYTHON) ] || python3 -m venv .venv) && \
+		([ -x $(ACQUISITION_PYTHON) ] || python3.12 -m venv .venv) && \
 		$(ACQUISITION_PYTHON) -m pip install -e .
 
 acquisition-test: ## Run acquisition storage/unit tests
@@ -521,30 +533,34 @@ acquisition-source-fetch: ## Fetch a specific source record (SOURCE=<name> RECOR
 	@test -n "$(RECORD_ID)" || (echo "RECORD_ID is required"; exit 1)
 	@cd $(ACQUISITION_DIR) && $(ACQUISITION_PYTHON) src/fetchers/$(FETCHER_SCRIPT) --source "$(SOURCE)" fetch "$(RECORD_ID)" "$(PDF_TYPE)"
 
-ingestion-install: ## Install ingestion dependencies
-	@cd $(INGESTION_DIR) && python3 -m pip install -r requirements.txt
+ingestion-install: ## Create data-ingestion venv (python3.11) and install dependencies
+	@cd $(INGESTION_DIR) && \
+		([ -x $(INGESTION_PYTHON) ] || python3.11 -m venv .venv) && \
+		$(if $(WORKSPACE),mkdir -p $(WORKSPACE)/pip-cache $(WORKSPACE)/pip-tmp,) \
+		$(PIP_TMPDIR_EXPORT) .venv/bin/pip install --upgrade pip && \
+		$(PIP_TMPDIR_EXPORT) .venv/bin/pip install $(PIP_CACHE_FLAGS) -r requirements.txt
 
 ingestion-api: ## Start ingestion pipeline API server on :8001
-	@cd $(INGESTION_DIR) && python3 -m uvicorn src.api.server:app --port 8001 --reload
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m uvicorn src.api.server:app --port 8001 --reload
 
 ingestion-test: ## Run all ingestion tests
-	@cd $(INGESTION_DIR) && python3 -m pytest tests/ -v
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m pytest tests/ -v
 
 ingestion-test-processors: ## Run ingestion processor tests
-	@cd $(INGESTION_DIR) && python3 tests/test_processors.py
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) tests/test_processors.py
 
 ingestion-test-embedder: ## Run ingestion embedder test
-	@cd $(INGESTION_DIR) && python3 tests/test_embedder.py
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) tests/test_embedder.py
 
 ingestion-test-qdrant: ## Run ingestion Qdrant test
-	@cd $(INGESTION_DIR) && python3 tests/test_qdrant.py
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) tests/test_qdrant.py
 
 ingestion-run: ## Run the ingestion pipeline (N=<max-pdfs> SKIP=<stage>)
 	@cd $(INGESTION_DIR) && \
-		python3 scripts/run_pipeline.py --config ../$(CONFIG_FILE) --max-pdfs "$(N)" $(if $(SKIP),--skip-$(SKIP),)
+		$(INGESTION_PYTHON) scripts/run_pipeline.py --config ../$(CONFIG_FILE) --max-pdfs "$(N)" $(if $(SKIP),--skip-$(SKIP),)
 
 ingestion-inspect: ## Inspect ingestion pipeline outputs
-	@cd $(INGESTION_DIR) && python3 scripts/inspect_pipeline.py
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/inspect_pipeline.py
 
 ingestion-qdrant-up: ## Start Qdrant for ingestion
 	@cd $(INGESTION_DIR) && docker compose -f infra/docker-compose.yaml up -d
@@ -557,40 +573,40 @@ ingestion-qdrant-logs: ## Stream Qdrant logs for ingestion
 
 ingestion-qdrant-clear: ## Clear embeddings from Qdrant
 	@cd $(INGESTION_DIR) && \
-		COLLECTION_NAME="$$(python3 -c 'import yaml; print(yaml.safe_load(open("../$(CONFIG_FILE)", "r", encoding="utf-8"))["data_ingestion"]["vectorization"]["collection_name"])')" && \
-		python3 -m src.storage.qdrant_manager -c ../$(CONFIG_FILE) clear "$$COLLECTION_NAME"
+		COLLECTION_NAME="$$($(INGESTION_PYTHON) -c 'import yaml; print(yaml.safe_load(open("../$(CONFIG_FILE)", "r", encoding="utf-8"))["data_ingestion"]["vectorization"]["collection_name"])')" && \
+		$(INGESTION_PYTHON) -m src.storage.qdrant_manager -c ../$(CONFIG_FILE) clear "$$COLLECTION_NAME"
 
 ingestion-qdrant-delete: ## Delete the Qdrant collection
 	@cd $(INGESTION_DIR) && \
-		COLLECTION_NAME="$$(python3 -c 'import yaml; print(yaml.safe_load(open("../$(CONFIG_FILE)", "r", encoding="utf-8"))["data_ingestion"]["vectorization"]["collection_name"])')" && \
-		python3 -m src.storage.qdrant_manager -c ../$(CONFIG_FILE) delete "$$COLLECTION_NAME"
+		COLLECTION_NAME="$$($(INGESTION_PYTHON) -c 'import yaml; print(yaml.safe_load(open("../$(CONFIG_FILE)", "r", encoding="utf-8"))["data_ingestion"]["vectorization"]["collection_name"])')" && \
+		$(INGESTION_PYTHON) -m src.storage.qdrant_manager -c ../$(CONFIG_FILE) delete "$$COLLECTION_NAME"
 
 ingestion-neo4j-build: ## Build the knowledge graph from chunks
-	@cd $(INGESTION_DIR) && python3 scripts/build_knowledge_graph.py --config ../$(CONFIG_FILE)
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/build_knowledge_graph.py --config ../$(CONFIG_FILE)
 
 ingestion-neo4j-delete: ## Delete all Neo4j knowledge graph data
-	@cd $(INGESTION_DIR) && python3 scripts/delete_knowledge_graph.py --config ../$(CONFIG_FILE)
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/delete_knowledge_graph.py --config ../$(CONFIG_FILE)
 
 ingestion-neo4j-stats: ## Show Neo4j graph statistics
 	@cd $(INGESTION_DIR) && \
-		python3 -c "import sys; sys.path.insert(0, '.'); \
+		$(INGESTION_PYTHON) -c "import sys; sys.path.insert(0, '.'); \
 		from src.config_loader import load_ingestion_config; \
 		from scripts.delete_knowledge_graph import KnowledgeGraphDeleter; \
 		cfg = load_ingestion_config('../$(CONFIG_FILE)'); \
 		d = KnowledgeGraphDeleter(cfg); d.get_graph_stats(); d.close()"
 
 ingestion-list-documents: ## List tracked documents
-	@cd $(INGESTION_DIR) && python3 scripts/compare_executions.py list-documents
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/compare_executions.py list-documents
 
 ingestion-list-executions: ## List executions for DOC=<uuid>
 	@test -n "$(DOC)" || (echo "DOC is required"; exit 1)
-	@cd $(INGESTION_DIR) && python3 scripts/compare_executions.py list-executions --doc "$(DOC)"
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/compare_executions.py list-executions --doc "$(DOC)"
 
 ingestion-compare-runs: ## Compare two executions for DOC=<uuid> EXEC1=<uuid> EXEC2=<uuid>
 	@test -n "$(DOC)" || (echo "DOC is required"; exit 1)
 	@test -n "$(EXEC1)" || (echo "EXEC1 is required"; exit 1)
 	@test -n "$(EXEC2)" || (echo "EXEC2 is required"; exit 1)
-	@cd $(INGESTION_DIR) && python3 scripts/compare_executions.py --doc "$(DOC)" --exec1 "$(EXEC1)" --exec2 "$(EXEC2)"
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/compare_executions.py --doc "$(DOC)" --exec1 "$(EXEC1)" --exec2 "$(EXEC2)"
 
 ingestion-clean: ## Remove ingestion caches and logs
 	@cd $(INGESTION_DIR) && \
@@ -601,3 +617,14 @@ ingestion-clean: ## Remove ingestion caches and logs
 ingestion-clean-all: ingestion-clean ## Remove all ingestion data outputs
 	@rm -rf data/artifacts/extract data/artifacts/convert data/artifacts/clean \
 		data/artifacts/chunk data/artifacts/highlight_cache 2>/dev/null || true
+
+# --- [ Split install targets ] ------------------------------------------------
+
+install-lightweight: reasoning-install acquisition-install blueprint-install ## Install non-GPU components (reasoning, acquisition, blueprint UI) — fast, no large downloads
+	@printf "$(GREEN)$(BOLD)Lightweight install complete.$(NC)\n"
+	@printf "  reasoning API, acquisition, and blueprint UI are ready.\n"
+	@printf "  For GPU runtimes: make install-gpu-runtimes\n"
+
+install-gpu-runtimes: ingestion-install inference-install ## Install GPU-heavy runtimes (inference + ingestion); redirects pip cache/tmp to /workspace when available
+	@printf "$(GREEN)$(BOLD)GPU runtime install complete.$(NC)\n"
+	$(if $(WORKSPACE),@printf "  Pip cache/tmp used: $(WORKSPACE)/pip-{cache,tmp}\n",)

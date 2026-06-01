@@ -25,6 +25,15 @@ header(){ echo -e "\n${BOLD}━━━  $*  ━━━${NC}\n"; }
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Redirect pip cache + tmp to /workspace when available (avoids root-fs exhaustion
+# on RunPod / Colab pods where root overlay is ≤20 GB but /workspace is large).
+if [[ -d /workspace ]]; then
+  export PIP_CACHE_DIR=/workspace/pip-cache
+  export TMPDIR=/workspace/pip-tmp
+  mkdir -p "$PIP_CACHE_DIR" "$TMPDIR"
+  info "Pip cache + tmp redirected → /workspace (root-fs protection)"
+fi
+
 echo -e "\n${BOLD}Healthcare Platform — Production Prerequisites Installer${NC}"
 echo -e "${CYAN}Repo root: ${REPO_ROOT}${NC}\n"
 
@@ -154,12 +163,11 @@ header "core-llm-inference (SGLang — production inference)"
 INFERENCE_DIR="$REPO_ROOT/core-llm-inference"
 
 if [[ ! -d "$INFERENCE_DIR/.venv" ]]; then
-  info "Creating core-llm-inference venv (python3.11, --system-site-packages)…"
-  # python3.11 matches the RunPod container Python — pre-built FlashInfer wheels
-  # exist only for Python 3.11/3.10 at the cu124/torch2.4 index.
-  # --system-site-packages inherits the container's pre-installed PyTorch 2.4.0,
-  # avoiding a redundant 2.8 GB download.
-  "$PYTHON311" -m venv --system-site-packages "$INFERENCE_DIR/.venv"
+  info "Creating core-llm-inference venv (python3.12)…"
+  # core-llm-inference/pyproject.toml requires >=3.12; use python3.12 explicitly.
+  # Large torch/sglang wheels land in PIP_CACHE_DIR (redirected to /workspace above
+  # when available) so they don't exhaust the root overlay filesystem.
+  "$PYTHON312" -m venv "$INFERENCE_DIR/.venv"
 fi
 
 INFERENCE_PIP="$INFERENCE_DIR/.venv/bin/pip"
@@ -168,19 +176,12 @@ INFERENCE_PYTHON="$INFERENCE_DIR/.venv/bin/python"
 info "Upgrading pip…"
 "$INFERENCE_PIP" install --quiet --upgrade pip
 
-# Skip torch download if the system-site-packages venv already exposes it.
-if "$INFERENCE_PYTHON" -c "import torch; torch.cuda.is_available()" 2>/dev/null; then
-  ok "torch inherited from container site-packages (skipping download)"
-else
-  info "Installing torch with CUDA 12.4 wheels…"
-  "$INFERENCE_PIP" install torch \
-    --extra-index-url https://download.pytorch.org/whl/cu124
-fi
+info "Installing torch with CUDA 12.4 wheels… (large download — see PIP_CACHE_DIR=${PIP_CACHE_DIR:-~/.cache/pip})"
+"$INFERENCE_PIP" install torch \
+  --extra-index-url https://download.pytorch.org/whl/cu124
 
-# SGLang with FlashInfer pre-built AOT kernels for cu124 / torch 2.4 / Python 3.11.
+# SGLang with FlashInfer pre-built AOT kernels for cu124 / torch 2.4 / Python 3.12.
 # --only-binary=:all: prevents silent fallback to 30-45 min CUDA source compilation.
-# --find-links path corrected from flashinfer/ to flashinfer-python.
-# --quiet removed so progress is visible and the terminal does not appear frozen.
 info "Installing sglang[all] with pre-built flashinfer cu124 wheels…"
 "$INFERENCE_PIP" install "sglang[all]" \
   --find-links https://flashinfer.ai/whl/cu124/torch2.4/flashinfer-python \
@@ -232,9 +233,11 @@ header "Python: data-ingestion (python3.11 venv, CUDA-aware torch)"
 
 INGESTION_DIR="$REPO_ROOT/data-ingestion"
 if [[ ! -d "$INGESTION_DIR/.venv" ]]; then
-  info "Creating venv (python3.11, --system-site-packages)…"
-  # --system-site-packages inherits the container's pre-installed PyTorch 2.4.0.
-  "$PYTHON311" -m venv --system-site-packages "$INGESTION_DIR/.venv"
+  info "Creating venv (python3.11)…"
+  # data-ingestion pins Python 3.11 (see .python-version). torch + heavy GPU deps
+  # are in requirements.txt; PIP_CACHE_DIR is redirected to /workspace above when
+  # available, so large wheels don't exhaust the root overlay filesystem.
+  "$PYTHON311" -m venv "$INGESTION_DIR/.venv"
 fi
 
 INGESTION_PIP="$INGESTION_DIR/.venv/bin/pip"
@@ -243,17 +246,8 @@ INGESTION_PYTHON="$INGESTION_DIR/.venv/bin/python"
 info "Upgrading pip…"
 "$INGESTION_PIP" install --quiet --upgrade pip
 
-# Skip torch download if already accessible via system-site-packages.
-if "$INGESTION_PYTHON" -c "import torch; torch.cuda.is_available()" 2>/dev/null; then
-  ok "torch inherited from container site-packages (skipping download)"
-else
-  info "Installing torch with CUDA 12.4 wheels…"
-  "$INGESTION_PIP" install --quiet torch torchvision \
-    --extra-index-url https://download.pytorch.org/whl/cu124
-fi
-
-info "Installing remaining requirements (surya-ocr, sentence-transformers, etc.) — ~5 min…"
-"$INGESTION_PIP" install --quiet -r "$INGESTION_DIR/requirements.txt"
+info "Installing requirements (torch, surya-ocr, sentence-transformers, etc.) — ~5 min… (cache → ${PIP_CACHE_DIR:-~/.cache/pip})"
+"$INGESTION_PIP" install -r "$INGESTION_DIR/requirements.txt"
 ok "data-ingestion dependencies installed"
 
 if "$INGESTION_PYTHON" -c "import spacy; spacy.load('en_core_web_lg')" >/dev/null 2>&1; then
