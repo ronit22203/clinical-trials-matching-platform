@@ -428,8 +428,9 @@ blueprint-install: ## Install palantir-blueprint npm dependencies
 	@cd $(BLUEPRINT_DIR) && npm install
 	@printf "$(GREEN)blueprint-install done.$(NC)\n"
 
-blueprint-dev: ## Start blueprint Vite dev server on :5173 (hot-reload)
+blueprint-dev: ## Start blueprint Vite dev server on :5173 (hot-reload, RunPod-ready)
 	@printf "$(BLUE)Starting blueprint dev server → $(CYAN)http://localhost:5173$(NC)\n"
+	@printf "$(YELLOW)On RunPod: https://{pod-id}-5173.proxy.runpod.net$(NC)\n"
 	@cd $(BLUEPRINT_DIR) && npm run dev
 
 blueprint-build: ## Production build of blueprint UI → palantir-blueprint/dist/

@@ -278,12 +278,46 @@ curl -s http://localhost:6333/collections/medical_papers | python3 -c \
 
 ## Phase 4 — Query the agent
 
+### 4.1 CLI
+
 ```bash
 # Single-shot query
 make reasoning-run-query QUERY="What biomarkers predict sepsis mortality?"
 
 # Interactive CLI
 make reasoning-run
+```
+
+### 4.2 Web UI (palantir-blueprint)
+
+```bash
+make reasoning-serve   # reasoning FastAPI on :8000 (if not already running via make dev)
+make ingestion-api     # ingestion FastAPI on :8001  (if not already running via make dev)
+make blueprint-dev     # Vite dev server on :5173
+```
+
+**Access on RunPod:**
+
+```
+https://{pod-id}-5173.proxy.runpod.net
+```
+
+> **Why only one port?** The UI runs on `:5173`. Vite's built-in proxy forwards
+> `/api/ingest/*` → `localhost:8001` and `/api/*` → `localhost:8000` server-side.
+> The browser only ever touches port 5173 — no other ports need to be exposed through
+> RunPod's proxy.
+
+To find your pod ID: RunPod dashboard → pod name → "Connect" → copy the proxy URL, or:
+
+```bash
+hostname   # pod hostname typically encodes the pod ID
+```
+
+For a production (non-hot-reload) serve:
+
+```bash
+make blueprint-preview   # build + serve on :4173 (same proxy rules apply)
+# RunPod URL: https://{pod-id}-4173.proxy.runpod.net
 ```
 
 The agent executes the deterministic two-phase pipeline:
@@ -348,3 +382,6 @@ make down                    # stop Neo4j + Qdrant
 | SGLang / inference (Docker or native) | 30000 | OpenAI-compatible REST |
 | Ollama (fallback) | 11434 | OpenAI-compatible REST |
 | Reasoning API (FastAPI) | 8000 | HTTP |
+| Ingestion API (FastAPI) | 8001 | HTTP |
+| Blueprint UI — dev (Vite, **expose this on RunPod**) | 5173 | HTTP |
+| Blueprint UI — preview (production build) | 4173 | HTTP |

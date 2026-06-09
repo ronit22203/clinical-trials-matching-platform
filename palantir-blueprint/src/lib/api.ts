@@ -1,10 +1,15 @@
 // Typed fetch wrappers for the clinical ops backend API.
 // All functions throw on non-2xx responses.
 
+// On RunPod (and any deployment behind a reverse proxy), use relative URLs so
+// Vite's dev/preview proxy can forward /api → :8000 and /ingest-api → :8001
+// without the browser needing direct access to those ports.
+// Override at build time via VITE_API_BASE_URL / VITE_INGEST_API_BASE_URL.
+
 // Reasoning API (query, match, KG)
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8000";
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 // Ingestion API (ingest, artifacts)
-const INGEST_BASE = (import.meta.env.VITE_INGEST_API_BASE_URL as string | undefined) ?? "http://localhost:8001";
+const INGEST_BASE = (import.meta.env.VITE_INGEST_API_BASE_URL as string | undefined) ?? "";
 
 // ─── Backend types — reasoning API (/api/match) ────────────────
 
