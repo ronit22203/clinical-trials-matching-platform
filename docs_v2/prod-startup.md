@@ -2,7 +2,20 @@
 
 This guide covers standing the platform up from scratch on a headless Ubuntu 22.04 server with
 an NVIDIA L4 GPU (Ada Lovelace, 23 GB VRAM). It replaces the [Quickstart](quickstart.md)
-macOS-centric flow: no LM Studio, no Ollama, no Docker daemon required.
+macOS-centric flow.
+
+**Inference deployment path (choose one):**
+
+| Path | When to use | Command |
+|------|-------------|---------|
+| **Docker (recommended)** | RunPod / any provider with NFS `/workspace` | `make inference-docker-run` |
+| **Ollama fallback** | Docker unavailable; quick start; NFS environment | `make inference-ollama-serve` |
+| **Native pip install** | Local SSD only (not NFS); CI/CD build machines | `make inference-install` |
+
+> **Why Docker?** RunPod's `/workspace` is an NFS network mount. Installing `torch` + `sglang[all]` +
+> flashinfer (~18 GB, millions of small files) over NFS via pip stalls for hours.
+> The pre-baked image (`ghcr.io/ronit22203/clinical-trials-inference`) has everything baked in —
+> `make inference-docker-run` pulls and starts it with zero NFS writes.
 
 ---
 
@@ -14,8 +27,8 @@ macOS-centric flow: no LM Studio, no Ollama, no Docker daemon required.
 | CPU | AMD EPYC 9254 (48 threads) or equivalent |
 | GPU | NVIDIA L4 — sm_89, 23 034 MiB VRAM, 300 GB/s |
 | CUDA driver | 580+ (CUDA 12.x / 13.x) |
-| Inference backend | SGLang via `core-llm-inference` |
-| Infrastructure | Native binaries (no Docker daemon) |
+| Inference backend | SGLang via Docker image (primary) / Ollama (fallback) |
+| Infrastructure | Native binaries (Qdrant, Neo4j) + Docker for inference |
 
 ---
 
@@ -43,7 +56,7 @@ What it installs (non-interactive, ~5–10 min):
 |------|------|
 | apt packages | build-essential, git, curl, python3.12+3.11, openjdk-21, Node 20, neo4j binary |
 | Qdrant binary | `/usr/local/bin/qdrant` from GitHub releases |
-| `core-llm-inference` | `.venv` under `core-llm-inference/` with `torch cu124` + `sglang[all]` + flashinfer wheels |
+| `core-llm-inference` | **Skipped** — use Docker or Ollama path (see Phase 0.4) |
 | Python venvs | `agentic-reasoning/.venv`, `data-acquisition/.venv`, `data-ingestion` pip install |
 | Data directories | `data/pdfs/`, `data/artifacts/`, `data/qdrant/` |
 | `.env.local` | Scaffolded from `.env.local.example` if not present |
@@ -71,31 +84,47 @@ SGLANG_BASE_URL=http://localhost:30000/v1
 
 > **Note:** `.env.local` is gitignored. Never commit credentials.
 
-### 0.4 Install module dependencies (if not already done by pre_requisites.sh)
+### 0.4 Install module dependencies
 
-> **Storage pre-check:** `inference-install` and `ingestion-install` download several GB
-> of GPU wheels. If your root filesystem has less than 25 GB free, ensure `/workspace` is
-> mounted — both `make install-gpu-runtimes` and `bash scripts/pre_requisites.sh`
-> automatically redirect pip cache and temp to `/workspace` when that path exists.
-
-Use the split-install targets to control what gets installed:
+#### Lightweight services (always do this)
 
 ```bash
-# Fast path — no GPU downloads (~2 min)
-make install-lightweight   # reasoning + acquisition + blueprint UI
-
-# GPU-heavy path — large torch/sglang/marker-pdf wheels (~15–20 min first run)
-# Pip cache + tmp auto-redirected to /workspace when mounted
-make install-gpu-runtimes  # inference (SGLang) + ingestion (OCR/Torch)
+make install-lightweight   # reasoning + acquisition + blueprint UI — ~2 min, no GPU wheels
 ```
 
-Or install components individually:
+#### Inference — choose ONE path
+
+**Option A — Docker (recommended for RunPod / NFS environments)**
 
 ```bash
-make reasoning-install     # agentic-reasoning .venv (python3.12)
-make acquisition-install   # data-acquisition .venv (python3.12)
-make ingestion-install     # data-ingestion .venv (python3.11) + torch + OCR stack
-make inference-install     # core-llm-inference .venv (python3.12) + torch cu124 + sglang
+# Log in to GHCR once (personal access token with read:packages scope)
+echo $GHCR_TOKEN | docker login ghcr.io -u ronit22203 --password-stdin
+
+# Pull the pre-baked image — no pip, no NFS writes
+docker pull ghcr.io/ronit22203/clinical-trials-inference:latest
+```
+
+`make inference-docker-run` (Phase 2.2) does the pull-and-run in one step.
+
+**Option B — Ollama (if Docker is unavailable)**
+
+```bash
+make inference-ollama-install   # single ~200 MB binary via curl — fast over NFS
+```
+
+**Option C — Native pip install (local SSD only)**
+
+> ⚠️ **Do not use on RunPod** — `/workspace` is NFS. Pip will stall writing ~18 GB of
+> torch + sglang wheels across the network. Use Option A or B instead.
+
+```bash
+make inference-install   # requires local SSD; pip cache auto-redirected to /workspace if mounted
+```
+
+#### GPU-heavy ingestion stack
+
+```bash
+make ingestion-install   # OCR/Torch wheels for data-ingestion (~5–10 min; also NFS-sensitive)
 ```
 
 ---
@@ -141,15 +170,48 @@ Wait ~15 s for Neo4j's JVM to finish initialising before proceeding.
 
 ### 2.2 Start the SGLang inference server
 
+#### Option A — Docker (recommended)
+
+```bash
+# Pull image if not already local, then start detached with GPU + shared memory
+make inference-docker-run
+# or with a different model:
+make inference-docker-run INFERENCE_MODEL=meta-llama/Llama-3.1-8B-Instruct
+```
+
+This runs `ghcr.io/ronit22203/clinical-trials-inference:latest` detached on port **30000** with
+`--gpus all` and `--shm-size 32g`. HuggingFace model weights are downloaded into
+`$WORKSPACE/hf-cache` (volume-mounted) on first start — allow 3–5 min for ~14 GB Qwen2.5-7B.
+Subsequent starts reuse the cache instantly.
+
+Stop with `make inference-docker-stop`.
+
+#### Option B — Ollama fallback
+
+```bash
+make inference-ollama-serve   # starts ollama serve + pulls qwen2.5:7b
+```
+
+Switch the reasoning module to Ollama in `config/app.yaml`:
+```yaml
+agent:
+  model: ollama/qwen2.5:7b
+```
+
+Ollama serves on `:11434` (OpenAI-compatible). The reasoning module's `ollama/` provider
+prefix routes to it automatically.
+
+#### Option C — Native SGLang (local SSD only)
+
 ```bash
 make inference-serve
 # or with explicit model override:
-make inference-serve MODEL=Qwen/Qwen2.5-7B-Instruct
+make inference-serve INFERENCE_MODEL=Qwen/Qwen2.5-7B-Instruct
 ```
 
-This starts SGLang detached in the background on port **30000**. On first load, the model
-weights are downloaded from HuggingFace (~14 GB for Qwen2.5-7B) — allow 3–5 min on a fresh
-pod. Subsequent starts reuse the HuggingFace cache.
+Requires `make inference-install` to have succeeded (local SSD; do not use on RunPod/NFS).
+
+---
 
 **VRAM headroom on 23 GB L4:**
 
@@ -159,10 +221,10 @@ pod. Subsequent starts reuse the HuggingFace cache.
 | `meta-llama/Llama-3.1-8B-Instruct` | ~16 GB | ✅ ~7 GB headroom |
 | `Qwen/Qwen2.5-14B-Instruct` | ~28 GB | ❌ use GPTQ-4bit |
 
-Monitor the server in real time (foreground mode):
+Monitor the native server in real time (foreground mode):
 
 ```bash
-make inference-serve-fg   # Ctrl-C to stop
+make inference-serve-fg   # Ctrl-C to stop (Option C only)
 ```
 
 ### 2.3 Verify everything is healthy
@@ -250,8 +312,9 @@ make inference-benchmark-all       # all queries + Prometheus push
 ## Shutdown
 
 ```bash
-make inference-stop   # gracefully terminate SGLang server
-make down             # stop Neo4j + Qdrant
+make inference-docker-stop   # stop Docker inference container (Option A)
+make inference-stop          # stop native SGLang process (Option C)
+make down                    # stop Neo4j + Qdrant
 ```
 
 ---
@@ -261,13 +324,16 @@ make down             # stop Neo4j + Qdrant
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | `make up` — Neo4j not ready after 30s | Java cold-start slower on large pods | Wait 30 more s; check `/tmp/neo4j.log` |
+| `make inference-install` stalls for hours | `/workspace` is NFS — pip writing 18 GB of tiny files over network | **Use `make inference-docker-run` (Docker, recommended) or `make inference-ollama-serve` (Ollama fallback)** |
+| `docker: Cannot connect to the Docker daemon` | Docker not installed / not running | `systemctl start docker`; or use Ollama fallback |
+| `docker pull` — `unauthorized` from GHCR | Not logged in | `echo $GHCR_TOKEN \| docker login ghcr.io -u ronit22203 --password-stdin` |
 | SGLang `CUDA out of memory` | Another process holds GPU memory | `nvidia-smi` → kill offending PID |
-| `make inference-status` — 404 | Server not started yet | `make inference-serve`; wait 60 s for model load |
+| `make inference-status` — 404 | Server not started yet | `make inference-docker-run`; wait 60 s for model load |
 | `No chunks found` on reasoning | Ingest not run | Run Phase 3 |
 | Neo4j password error | Initial password not set | `neo4j-admin dbms set-initial-password <password>` |
 | `pre_requisites.sh` partial failure | Interrupted mid-run | Re-run — script is idempotent; check log output |
 | HuggingFace download stalls | Rate limit / no token | Set `HF_TOKEN=<token>` in `.env.local`; `export $(grep -v ^# .env.local \| xargs)` |
-| `No space left on device` or `Disk quota exceeded` during install | Root filesystem < 25 GB free; GPU wheels writing to root | Mount `/workspace` (RunPod: always available); `make install-gpu-runtimes` and `bash scripts/pre_requisites.sh` auto-redirect pip cache + tmp there |
+| `No space left on device` during ingestion install | Root filesystem < 25 GB free; OCR/Torch wheels writing to root | Mount `/workspace`; `make ingestion-install` auto-redirects pip cache + tmp there |
 
 ---
 
@@ -279,5 +345,6 @@ make down             # stop Neo4j + Qdrant
 | Qdrant gRPC | 6334 | gRPC |
 | Neo4j Bolt | 7687 | Bolt |
 | Neo4j HTTP (browser) | 7474 | HTTP |
-| SGLang / agentic-reasoning | 30000 | OpenAI-compatible REST |
+| SGLang / inference (Docker or native) | 30000 | OpenAI-compatible REST |
+| Ollama (fallback) | 11434 | OpenAI-compatible REST |
 | Reasoning API (FastAPI) | 8000 | HTTP |

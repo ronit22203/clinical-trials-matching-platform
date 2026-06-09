@@ -35,6 +35,15 @@ INFERENCE_MODEL ?= Qwen/Qwen2.5-7B-Instruct
 INFERENCE_PORT  ?= 30000
 INFERENCE_HOST  ?= 0.0.0.0
 
+# Docker image coordinates (GHCR)
+INFERENCE_IMAGE_REPO   ?= ghcr.io/ronit22203/clinical-trials-inference
+INFERENCE_IMAGE_TAG    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo latest)
+INFERENCE_IMAGE        := $(INFERENCE_IMAGE_REPO):$(INFERENCE_IMAGE_TAG)
+INFERENCE_IMAGE_LATEST := $(INFERENCE_IMAGE_REPO):latest
+
+# Ollama fallback — model name uses Ollama's registry format (not HuggingFace path)
+INFERENCE_MODEL_OLLAMA ?= qwen2.5:7b
+
 SOURCE ?= medrxiv
 MAX_PDFS ?= 2
 N ?= 2
@@ -78,6 +87,8 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	dev \
 	inference-install inference-serve inference-serve-fg inference-stop \
 	inference-status inference-benchmark inference-benchmark-all \
+	inference-docker-build inference-docker-push inference-docker-run inference-docker-stop \
+	inference-ollama-install inference-ollama-serve \
 	reasoning-install reasoning-clean reasoning-test reasoning-run reasoning-run-query reasoning-serve \
 	reasoning-graphrag-up reasoning-graphrag-down \
 	reasoning-download-models reasoning-sglang-run reasoning-sglang-run-query \
@@ -510,6 +521,68 @@ inference-benchmark-all: ## Benchmark with all queries + Prometheus push
 		--warmup \
 		--gpu l4 \
 		--prometheus
+
+# --- [ core-llm-inference — Docker pre-baked image ] -------------------------
+# Build once on a machine with local SSD → push to GHCR → pull on RunPod.
+# Eliminates the NFS pip-install bottleneck: `make inference-docker-run` is
+# the zero-install path for RunPod deployments.
+
+inference-docker-build: ## Build pre-baked SGLang inference image and tag it
+	@printf "$(CYAN)Building inference image: $(INFERENCE_IMAGE)$(NC)\n"
+	@docker build \
+		--tag "$(INFERENCE_IMAGE)" \
+		--tag "$(INFERENCE_IMAGE_LATEST)" \
+		"$(INFERENCE_DIR)"
+	@printf "$(GREEN)Build complete: $(INFERENCE_IMAGE)$(NC)\n"
+	@printf "$(YELLOW)Next: make inference-docker-push$(NC)\n"
+
+inference-docker-push: ## Push inference image to GHCR (both SHA tag and :latest)
+	@printf "$(CYAN)Pushing $(INFERENCE_IMAGE)…$(NC)\n"
+	@docker push "$(INFERENCE_IMAGE)"
+	@docker push "$(INFERENCE_IMAGE_LATEST)"
+	@printf "$(GREEN)Pushed to GHCR.$(NC)\n"
+	@printf "$(YELLOW)On RunPod: make inference-docker-run$(NC)\n"
+
+inference-docker-run: ## Pull + run inference container on RunPod (--gpus all, port 30000)
+	@printf "$(CYAN)Launching inference container: $(INFERENCE_MODEL) on :$(INFERENCE_PORT)$(NC)\n"
+	@docker run --detach \
+		--name clinical-inference \
+		--gpus all \
+		--shm-size 32g \
+		-p $(INFERENCE_PORT):$(INFERENCE_PORT) \
+		$(if $(WORKSPACE),-v $(WORKSPACE)/hf-cache:/root/.cache/huggingface,) \
+		-e MODEL_PATH="$(INFERENCE_MODEL)" \
+		-e HOST="$(INFERENCE_HOST)" \
+		-e PORT="$(INFERENCE_PORT)" \
+		"$(INFERENCE_IMAGE_LATEST)"
+	@printf "$(GREEN)Container started → http://$(INFERENCE_HOST):$(INFERENCE_PORT)$(NC)\n"
+	@printf "$(YELLOW)Check status: make inference-status$(NC)\n"
+
+inference-docker-stop: ## Stop and remove the running inference container
+	@printf "$(YELLOW)Stopping inference container…$(NC)\n"
+	@docker stop clinical-inference 2>/dev/null && docker rm clinical-inference 2>/dev/null \
+		&& printf "$(GREEN)Inference container stopped and removed.$(NC)\n" \
+		|| printf "$(YELLOW)No running inference container found.$(NC)\n"
+
+# --- [ core-llm-inference — Ollama fallback (NFS-safe) ] ---------------------
+# Ollama installs as a single ~200MB binary via curl — fast over NFS.
+# Serves models via OpenAI-compatible API on :11434.
+# Use when Docker is unavailable or as a lightweight alternative to SGLang.
+
+inference-ollama-install: ## Install Ollama binary via curl (NFS-safe, ~200MB)
+	@printf "$(CYAN)Installing Ollama…$(NC)\n"
+	@curl -fsSL https://ollama.com/install.sh | sh
+	@printf "$(GREEN)Ollama installed: $$(ollama --version)$(NC)\n"
+
+inference-ollama-serve: ## Start Ollama server + pull model (NFS-safe SGLang alternative)
+	@printf "$(CYAN)Starting Ollama server…$(NC)\n"
+	@nohup ollama serve > /tmp/ollama.log 2>&1 & sleep 3
+	@printf "$(CYAN)Pulling model: $(INFERENCE_MODEL_OLLAMA)$(NC)\n"
+	@ollama pull "$(INFERENCE_MODEL_OLLAMA)"
+	@printf "$(GREEN)Ollama running at http://localhost:11434 with $(INFERENCE_MODEL_OLLAMA)$(NC)\n"
+	@printf "$(YELLOW)To use with the reasoning module, set in config/app.yaml:$(NC)\n"
+	@printf "$(YELLOW)  agent.model: ollama/$(INFERENCE_MODEL_OLLAMA)$(NC)\n"
+	@printf "$(YELLOW)Then run: make reasoning-run$(NC)\n"
 
 acquisition-install: ## Create acquisition venv if needed and install editable package
 	@cd $(ACQUISITION_DIR) && \
