@@ -214,7 +214,18 @@ function ResultCard({
         </div>
         <div style={{ display: "flex", gap: 5, alignItems: "center", flexShrink: 0 }}>
           {!clinicianMode && <Tag minimal>{result.strategy}</Tag>}
-          <Tag minimal intent={scoreIntent(result.matchScore)}>{result.matchScore.toFixed(2)}</Tag>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+            <Tag minimal intent={scoreIntent(result.matchScore)}>{result.matchScore.toFixed(2)}</Tag>
+            <div style={{ width: 36, height: 2, borderRadius: 1, background: "var(--border)", overflow: "hidden" }}>
+              <div style={{
+                height: "100%",
+                width: `${result.matchScore * 100}%`,
+                background: result.matchScore >= 0.9 ? "var(--status-nominal)" : result.matchScore >= 0.8 ? "var(--status-warning)" : "var(--status-critical)",
+                borderRadius: 1,
+                transition: "width 0.3s var(--ease-out)",
+              }} />
+            </div>
+          </div>
           <Icon icon={expanded ? "chevron-up" : "chevron-down"} size={12} color="var(--text-dim)" />
         </div>
       </div>
@@ -270,6 +281,10 @@ export default function QueryPane({
     phase: [], status: [], strategy: [],
   });
   const [highlightedNct, setHighlighted] = useState<string | null>(null);
+  const [synthesisExpanded, setSynthesisExpanded] = useState(false);
+
+  // Search input ref for keyboard shortcut
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Vertical split: top (results) / bottom (provenance + graph)
   const [splitPct, setSplitPct]   = useState(60);
@@ -368,6 +383,27 @@ export default function QueryPane({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryState, liveResults.length]);
 
+  // Collapse synthesis when a new query starts
+  useEffect(() => {
+    if (synthesisLoading) setSynthesisExpanded(false);
+  }, [synthesisLoading]);
+
+  // Keyboard shortcut: "/" focuses search, Escape blurs
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (e.key === "/" && tag !== "INPUT" && tag !== "TEXTAREA") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+      if (e.key === "Escape") {
+        searchInputRef.current?.blur();
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   function onVDragStart(e: React.MouseEvent) {
     e.preventDefault();
     vDragStartY.current    = e.clientY;
@@ -449,26 +485,31 @@ export default function QueryPane({
             </Tag>
           )}
         </div>
-        {visibleResults.map((result) => (
-          <ResultCard
+        {visibleResults.map((result, index) => (
+          <div
             key={result.id}
-            result={result}
-            expanded={expandedResult === result.id}
-            highlighted={highlightedNct === result.nct}
-            clinicianMode={clinicianMode}
-            onToggle={() => {
-              const next = expandedResult === result.id ? null : result.id;
-              setExpanded(next);
-              if (next) setHighlighted(null);
-            }}
-          />
+            className="result-card-enter"
+            style={{ animationDelay: `${index * 55}ms` }}
+          >
+            <ResultCard
+              result={result}
+              expanded={expandedResult === result.id}
+              highlighted={highlightedNct === result.nct}
+              clinicianMode={clinicianMode}
+              onToggle={() => {
+                const next = expandedResult === result.id ? null : result.id;
+                setExpanded(next);
+                if (next) setHighlighted(null);
+              }}
+            />
+          </div>
         ))}
         {hasMore && (
           <Button
             minimal fill
             icon="plus"
-            text={`Load ${Math.min(2, results.length - displayCount)} more`}
-            onClick={() => setDisplayCount((c) => c + 2)}
+            text={`Load more · ${results.length - displayCount} remaining`}
+            onClick={() => setDisplayCount((c) => c + 5)}
             style={{ fontFamily: "var(--text-mono)", fontSize: 11 }}
           />
         )}
@@ -537,12 +578,13 @@ export default function QueryPane({
         }}
       >
         <InputGroup
-          placeholder="e.g. heparin dosing renal impairment STEMI..."
+          placeholder="Search… (press / to focus)"
           leftIcon="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && runQuery()}
           fill
+          inputRef={searchInputRef}
           style={{ fontFamily: "var(--text-mono)" }}
           rightElement={
             query ? (
@@ -612,12 +654,21 @@ export default function QueryPane({
       {/* Synthesis banner — sticky, above the scroll area */}
       {queryState === "results" && (
         <div className="synthesis-banner">
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: synthesisLoading || synthesis ? 8 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: synthesisLoading || synthesis ? 6 : 0 }}>
             <span className="section-label" style={{ margin: 0 }}>
               {clinicianMode ? "CLINICAL SUMMARY" : "AI SYNTHESIS"}
             </span>
             {synthesisLoading && <Tag minimal intent={Intent.PRIMARY} style={{ fontSize: 9 }}>generating…</Tag>}
             {!synthesisLoading && synthesis && <Tag minimal intent={Intent.SUCCESS} style={{ fontSize: 9 }}>done</Tag>}
+            {!synthesisLoading && synthesis && (
+              <Button
+                minimal small
+                icon={synthesisExpanded ? "chevron-up" : "chevron-down"}
+                onClick={() => setSynthesisExpanded((v) => !v)}
+                title={synthesisExpanded ? "Collapse summary" : "Expand summary"}
+                style={{ marginLeft: "auto", height: 18, minHeight: 18, minWidth: 18, padding: 0 }}
+              />
+            )}
           </div>
           {synthesisLoading ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -625,9 +676,27 @@ export default function QueryPane({
               <div className={Classes.SKELETON} style={{ height: 11, width: "85%", borderRadius: 2 }} />
             </div>
           ) : synthesis ? (
-            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.65, color: "var(--text-secondary)", whiteSpace: "pre-wrap" }}>
-              {synthesis}
-            </p>
+            <div
+              style={{
+                overflow: "hidden",
+                maxHeight: synthesisExpanded ? "none" : "4.5em",
+                transition: "max-height 0.2s ease",
+                position: "relative",
+              }}
+            >
+              <p style={{ margin: 0, fontSize: 12, lineHeight: 1.65, color: "var(--text-secondary)", whiteSpace: "pre-wrap" }}>
+                {synthesis}
+              </p>
+              {!synthesisExpanded && (
+                <div
+                  style={{
+                    position: "absolute", bottom: 0, left: 0, right: 0, height: "1.5em",
+                    background: "linear-gradient(transparent, var(--surface-1))",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+            </div>
           ) : null}
         </div>
       )}
@@ -690,23 +759,32 @@ export default function QueryPane({
           padding: "4px 14px",
           display: "flex",
           alignItems: "center",
-          gap: 8,
+          gap: 6,
+          flexWrap: "wrap",
         }}
       >
         {clinicianMode ? (
-          <span className="status-dot" style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
-            <span style={{ color: "var(--status-nominal)", marginRight: 5 }}>●</span>System online
+          <span className="status-chip">
+            <span style={{ color: "var(--status-nominal)" }}>●</span>
+            System online
           </span>
         ) : (
-          <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>
-            {[
-              `hits: ${queryState === "results" ? String(liveMeta?.totalHits ?? results.length) : "—"}`,
-              `latency: ${queryState === "results" && liveMeta ? `${liveMeta.latencyMs}ms` : "—"}`,
-              `index: ${liveMeta?.indexVersion ?? "—"}`,
-              `strategy: ${liveMeta?.strategy ?? "—"}`,
-            ].join("  ·  ")}
-            <span style={{ color: "var(--status-nominal)", marginLeft: 10 }}>● online</span>
-          </span>
+          <>
+            {([
+              ["HITS",     queryState === "results" ? String(liveMeta?.totalHits ?? results.length) : "—"],
+              ["LATENCY",  queryState === "results" && liveMeta ? `${liveMeta.latencyMs}ms` : "—"],
+              ["INDEX",    liveMeta?.indexVersion ?? "—"],
+              ["STRATEGY", liveMeta?.strategy ?? "—"],
+            ] as [string, string][]).map(([label, val]) => (
+              <span key={label} className="status-chip">
+                <span style={{ opacity: 0.55 }}>{label}</span>
+                <strong style={{ fontWeight: 500, color: "var(--text-primary)" }}>{val}</strong>
+              </span>
+            ))}
+            <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--status-nominal)", marginLeft: 4 }}>
+              ● online
+            </span>
+          </>
         )}
       </div>
     </div>

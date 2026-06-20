@@ -18,7 +18,7 @@ import {
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
-import { startIngestStream, fetchChunks, fetchMarkdownArtifact, fetchCleanArtifact, getOcrVizUrl } from "../lib/api";
+import { fetchChunks, fetchMarkdownArtifact, fetchCleanArtifact, getOcrVizUrl } from "../lib/api";
 import { adaptChunk } from "../lib/adapters";
 import type { UIChunk } from "../lib/adapters";
 
@@ -48,10 +48,11 @@ type ChunkEntity = UIChunk["entities"][number];
 // ─── Mock data ────────────────────────────────────────────────
 
 const INITIAL_STEPS: PipelineStep[] = [
-  { name: "OCR Processing",       clinicianName: "Reading document",           progress: 0, status: "idle" },
-  { name: "Text Chunking",        clinicianName: "Extracting medical terms",   progress: 0, status: "idle" },
-  { name: "Markdown Cleaning",    clinicianName: "Organizing content",         progress: 0, status: "idle" },
-  { name: "Embedding & Indexing", clinicianName: "Building knowledge graph",   progress: 0, status: "idle" },
+  { name: "OCR Processing",        clinicianName: "Reading document",           progress: 0, status: "idle" },
+  { name: "Markdown Conversion",   clinicianName: "Converting to markdown",     progress: 0, status: "idle" },
+  { name: "Text Cleaning",         clinicianName: "Cleaning content",           progress: 0, status: "idle" },
+  { name: "Chunking",              clinicianName: "Extracting medical terms",   progress: 0, status: "idle" },
+  { name: "Embedding & Indexing",  clinicianName: "Building knowledge graph",   progress: 0, status: "idle" },
 ];
 
 // Word-level OCR bounding boxes
@@ -332,8 +333,9 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
   const [done, setDone]                   = useState(false);
   const [mdView, setMdView]               = useState<MarkdownView>("output");
   const [showDebug, setShowDebug]         = useState(false);
-  const [showLog, setShowLog]             = useState(false);
+  const [showLog, setShowLog]             = useState(true);
   const [selectedFile, setSelectedFile]   = useState<File | null>(null);
+  const [isDragOver, setIsDragOver]       = useState(false);
   const [jobId, setJobId]                 = useState<string | null>(null);
   const [ocrVizUrl, setOcrVizUrl]         = useState<string | null>(null);
   const [ocrPageCount, setOcrPageCount]   = useState<number>(1);
@@ -351,9 +353,30 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file?.type === "application/pdf") {
+      setSelectedFile(file);
+      setDone(false);
+    }
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragOver(false);
+    }
+  }
+
   // Backend step name → UI step index (4 UI slots, 5+ backend stages)
   const STEP_MAP: Record<string, number> = {
-    ocr: 0, chunk: 1, convert: 2, clean: 2, vectorize: 3, kg: 3,
+    ocr: 0, convert: 1, clean: 2, chunk: 3, vectorize: 4, kg: 4,
   };
 
   function setStep(i: number, patch: Partial<PipelineStep>) {
@@ -402,14 +425,27 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     setRawOcrText("");
     setSteps(INITIAL_STEPS.map((s) => ({ ...s, progress: 0, status: "idle" as StepStatus })));
 
+    // 30 s connection timeout — prevents the UI hanging silently if the API is not up
+    const abortCtrl = new AbortController();
+    const connectTimeout = setTimeout(() => abortCtrl.abort(), 30_000);
+
     let response: Response;
     try {
-      response = await startIngestStream(selectedFile);
+      response = await fetch(`/api/ingest`, {
+        method: "POST",
+        body: (() => { const f = new FormData(); f.append("file", selectedFile); return f; })(),
+        signal: abortCtrl.signal,
+      });
     } catch (err) {
-      addLogLine(`[error] Failed to connect: ${String(err)}`);
+      const msg = abortCtrl.signal.aborted
+        ? "Connection timed out — is the ingestion API running on :8001?"
+        : String(err);
+      addLogLine(`[error] ${msg}`);
       setRunning(false);
-      setStep(0, { status: "failed", errorMsg: String(err) });
+      setStep(0, { status: "failed", errorMsg: msg });
       return;
+    } finally {
+      clearTimeout(connectTimeout);
     }
 
     if (!response.ok) {
@@ -599,26 +635,34 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
         }}
       >
 
-        {/* Idle state */}
+        {/* Idle state — drag-and-drop zone */}
         {!running && !done && logLines.length === 0 && (
-          selectedFile ? (
-            <PdfPreview file={selectedFile} onStart={startIngestion} clinicianMode={clinicianMode} />
-          ) : (
-            <NonIdealState
-              icon={clinicianMode ? "document" : "cloud-upload"}
-              title={clinicianMode ? "No document selected" : "No ingestion running"}
-              description={
-                clinicianMode
-                  ? "Choose a PDF file using the button above, then press Upload & Process."
-                  : "Select a PDF using the Choose PDF button, then press Start Ingestion."
-              }
-              action={
-                <Button icon="folder-open" onClick={() => fileRef.current?.click()}>
-                  Choose PDF
-                </Button>
-              }
-            />
-          )
+          <div
+            className={`drop-zone${isDragOver ? " drop-zone--active" : ""}`}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            style={{ flex: selectedFile ? undefined : 1, minHeight: selectedFile ? undefined : 120 }}
+          >
+            {selectedFile ? (
+              <PdfPreview file={selectedFile} onStart={startIngestion} clinicianMode={clinicianMode} />
+            ) : (
+              <NonIdealState
+                icon={clinicianMode ? "document" : "cloud-upload"}
+                title={isDragOver ? "Drop to upload" : (clinicianMode ? "No document selected" : "Drop PDF here or browse")}
+                description={
+                  clinicianMode
+                    ? "Choose a PDF file using the button above, then press Upload & Process."
+                    : "Drag a PDF onto this area, or click Choose PDF to browse."
+                }
+                action={
+                  <Button icon="folder-open" onClick={() => fileRef.current?.click()}>
+                    Choose PDF
+                  </Button>
+                }
+              />
+            )}
+          </div>
         )}
 
         {/* Pipeline steps */}

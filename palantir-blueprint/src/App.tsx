@@ -15,6 +15,7 @@ export default function App() {
   const [clinicianMode, setClinicalMode] = useState(true);
   const [paneWidth, setPaneWidth]       = useState(PANE_DEFAULT);
   const [collapsed, setCollapsed]       = useState(false);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [dragging, setDragging]         = useState(false);
   // Session history + patient context
   const [history, setHistory]           = useState<QueryHistoryItem[]>([]);
@@ -72,19 +73,89 @@ export default function App() {
     >
       <Navigation clinicianMode={clinicianMode} onModeToggle={() => setClinicalMode((v) => !v)} />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        <LeftPane
-          history={history}
-          onSelect={handleSelectHistory}
-          record={patientRecord}
-          onUpdateRecord={setRecord}
-        />
+
+        {/* LeftPane with animated width */}
+        <div
+          style={{
+            width: leftCollapsed ? 0 : 200,
+            flexShrink: 0,
+            overflow: "hidden",
+            transition: "width 0.22s cubic-bezier(0.4,0,0.2,1)",
+          }}
+        >
+          <LeftPane
+            history={history}
+            onSelect={handleSelectHistory}
+            onClearHistory={() => setHistory([])}
+            record={patientRecord}
+            onUpdateRecord={setRecord}
+          />
+        </div>
+
+        {/* Left pane collapse / expand handle */}
+        <div
+          style={{
+            width: 8,
+            flexShrink: 0,
+            position: "relative",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10,
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: 1,
+              left: "50%",
+              transform: "translateX(-50%)",
+              background: "var(--border)",
+            }}
+          />
+          <button
+            onClick={() => setLeftCollapsed((v) => !v)}
+            style={{
+              position: "relative",
+              zIndex: 2,
+              width: 18,
+              height: 36,
+              borderRadius: 9,
+              border: "1px solid var(--border)",
+              background: "var(--surface-2)",
+              color: "var(--text-dim)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 0,
+              fontSize: 10,
+              transition: "all 0.15s ease",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "var(--surface-3)";
+              (e.currentTarget as HTMLButtonElement).style.color = "var(--accent-primary)";
+              (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--accent-primary)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "var(--surface-2)";
+              (e.currentTarget as HTMLButtonElement).style.color = "var(--text-dim)";
+              (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)";
+            }}
+            title={leftCollapsed ? "Expand panel" : "Collapse panel"}
+          >
+            {leftCollapsed ? "›" : "‹"}
+          </button>
+        </div>
+
         <QueryPane
           clinicianMode={clinicianMode}
           externalFill={externalFill}
           onQueryComplete={handleQueryComplete}
         />
 
-        {/* Drag handle + collapse toggle */}
+        {/* Drag handle + collapse toggle for right pane */}
         <div
           style={{
             width: 8,

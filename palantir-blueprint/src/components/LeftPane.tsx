@@ -22,6 +22,7 @@ export interface PatientRecord {
 interface LeftPaneProps {
   history: QueryHistoryItem[];
   onSelect: (query: string) => void;
+  onClearHistory: () => void;
   record: PatientRecord;
   onUpdateRecord: (r: PatientRecord) => void;
 }
@@ -47,7 +48,7 @@ const RECORD_FIELDS: { key: keyof PatientRecord; label: string; placeholder?: st
 
 // ─── Component ────────────────────────────────────────────────
 
-export default function LeftPane({ history, onSelect, record, onUpdateRecord }: LeftPaneProps) {
+export default function LeftPane({ history, onSelect, onClearHistory, record, onUpdateRecord }: LeftPaneProps) {
   const [editing, setEditing] = useState(false);
   const [draft,   setDraft]   = useState<PatientRecord>(record);
 
@@ -69,9 +70,19 @@ export default function LeftPane({ history, onSelect, record, onUpdateRecord }: 
       {/* ── Previous Queries ─────────────────────────────── */}
       <div className="left-pane-section-header">
         <span className="section-label" style={{ margin: 0 }}>PREVIOUS QUERIES</span>
-        {history.length > 0 && (
-          <Tag minimal style={{ fontSize: 9, padding: "1px 5px" }}>{history.length}</Tag>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          {history.length > 0 && (
+            <Tag minimal style={{ fontSize: 9, padding: "1px 5px" }}>{history.length}</Tag>
+          )}
+          {history.length > 0 && (
+            <Button
+              minimal small icon="small-cross"
+              onClick={onClearHistory}
+              style={{ height: 20, minHeight: 20, minWidth: 20, padding: "0 4px" }}
+              title="Clear history"
+            />
+          )}
+        </div>
       </div>
 
       <div className="left-pane-history">

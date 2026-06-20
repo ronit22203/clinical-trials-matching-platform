@@ -19,11 +19,20 @@ export default function Navigation({ clinicianMode, onModeToggle }: NavigationPr
         <Tag minimal style={{ opacity: 0.6, fontWeight: 400 }}>1.0</Tag>
       </NavbarGroup>
       <NavbarGroup align="right">
+        {/* Current mode indicator */}
+        <Tag
+          minimal
+          intent={clinicianMode ? Intent.PRIMARY : Intent.WARNING}
+          style={{ fontFamily: "var(--text-mono)", fontSize: 9, letterSpacing: "0.06em", marginRight: 6 }}
+          title={clinicianMode ? "Clinical mode: simplified view for clinicians" : "Audit mode: full technical detail"}
+        >
+          {clinicianMode ? "CLINICAL" : "AUDIT"}
+        </Tag>
         <Button
           minimal
           small
           icon={clinicianMode ? "settings" : "pulse"}
-          text={clinicianMode ? "Audit View" : "Clinical View"}
+          text={clinicianMode ? "Switch to Audit" : "Switch to Clinical"}
           onClick={onModeToggle}
           style={{ fontFamily: "var(--text-mono)", fontSize: 10, letterSpacing: "0.04em" }}
         />

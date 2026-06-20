@@ -453,8 +453,6 @@ body::before {
   border-left: 3px solid var(--accent-primary);
   background: var(--surface-1);
   flex-shrink: 0;
-  max-height: 140px;
-  overflow-y: auto;
 }
 
 /* ─── Left Pane ─────────────────────────────────────────────── */
@@ -644,4 +642,58 @@ body::before {
 
 .pdf-preview-thumb .react-pdf__Page canvas {
   display: block;
+}
+
+/* ─── Focus-visible a11y rings ──────────────────────────────── */
+*:focus-visible {
+  outline: 2px solid var(--accent-primary) !important;
+  outline-offset: 2px !important;
+  border-radius: 4px;
+}
+
+/* ─── Result card enter animation ───────────────────────────── */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.result-card-enter {
+  animation: fadeSlideIn 0.22s var(--ease-out) both;
+}
+
+/* ─── Drag-and-drop upload zone ─────────────────────────────── */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  transition: border-color var(--dur-std) var(--ease-std),
+              background   var(--dur-std) var(--ease-std);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drop-zone--active {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary-dim);
+}
+
+/* ─── Status bar chips ──────────────────────────────────────── */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--text-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
