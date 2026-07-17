@@ -411,14 +411,22 @@ async def serve_source_pdf(source: str) -> FileResponse:
     `source` may be a bare filename (e.g. 'study.pdf') or a relative path.
     Searches UPLOAD_DIR and data/pdfs/raw/ for the matching file.
     """
-    name = Path(source).name
+    raw_name = Path(source).name
+
+    # Normalise: if source is a legacy _cleaned.md artifact name, derive the PDF slug.
+    # e.g. "doc_cleaned.md" → "doc.pdf"
+    if raw_name.endswith("_cleaned.md"):
+        raw_name = raw_name[: -len("_cleaned.md")] + ".pdf"
+    elif not raw_name.lower().endswith(".pdf"):
+        raw_name = Path(raw_name).stem + ".pdf"
+
     search_dirs = [
         UPLOAD_DIR,
         _REPO_ROOT / "data" / "pdfs" / "raw",
     ]
     for search_dir in search_dirs:
         if search_dir.exists():
-            for pdf_path in search_dir.rglob(name):
+            for pdf_path in search_dir.rglob(raw_name):
                 if pdf_path.is_file() and pdf_path.suffix.lower() == ".pdf":
                     return FileResponse(
                         str(pdf_path),

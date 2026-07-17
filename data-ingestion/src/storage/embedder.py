@@ -126,9 +126,16 @@ class MedicalVectorizer:
                 normalize_embeddings=self._normalize_embeddings,
             ).tolist()
             
+            # Derive original PDF filename from the cleaned MD artifact
+            # e.g. "doc_cleaned.md" → "doc.pdf"
+            stem = file_path.stem
+            if stem.endswith("_cleaned"):
+                stem = stem[: -len("_cleaned")]
+            pdf_source = stem + ".pdf"
+
             # Prepare metadata
             metadata = {
-                'source': file_path.name,
+                'source': pdf_source,
                 'content': chunk['content'],
                 'context': chunk['context'],
                 'level': chunk['level'],

@@ -1,4 +1,3 @@
-import { useState, useRef, useEffect } from "react";
 import {
   Button,
   Callout,
@@ -14,13 +13,14 @@ import {
   Pre,
   Tag,
 } from "@blueprintjs/core";
+import { useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
-import KnowledgeGraph from "./KnowledgeGraph";
-import { useQueryPoll } from "../lib/useQueryPoll";
+import "react-pdf/dist/Page/TextLayer.css";
+import type { ProvenanceSource, TrialResult } from "../lib/adapters";
 import { getPdfSourceUrl } from "../lib/api";
-import type { TrialResult, ProvenanceSource } from "../lib/adapters";
+import { useQueryPoll } from "../lib/useQueryPoll";
+import KnowledgeGraph from "./KnowledgeGraph";
 
 // Configure PDF.js worker (served from node_modules via Vite's new URL() bundling)
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -33,8 +33,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 
 
 const FILTER_OPTIONS = {
-  phase:    ["Phase 2", "Phase 3", "N/A"],
-  status:   ["Recruiting", "Active, not recruiting", "Completed"],
+  phase: ["Phase 2", "Phase 3", "N/A"],
+  status: ["Recruiting", "Active, not recruiting", "Completed"],
   strategy: ["BM25 + Dense", "Dense", "BM25"],
 };
 
@@ -48,22 +48,22 @@ function scoreIntent(score: number): Intent {
 
 function enrollmentIntent(status: string): Intent {
   if (status === "Recruiting") return Intent.SUCCESS;
-  if (status === "Completed")  return Intent.NONE;
+  if (status === "Completed") return Intent.NONE;
   return Intent.WARNING;
 }
 
 function confHighlightStyle(conf: number): React.CSSProperties {
-  if (conf >= 0.9) return { background: "rgba(42,161,152,0.14)",  borderBottom: "1px solid rgba(42,161,152,0.5)",  paddingBottom: 1 };
-  if (conf >= 0.8) return { background: "rgba(181,137,0,0.13)",   borderBottom: "1px solid rgba(181,137,0,0.45)",  paddingBottom: 1 };
-  return              { background: "rgba(203,75,22,0.10)",    borderBottom: "1px solid rgba(203,75,22,0.40)",  paddingBottom: 1 };
+  if (conf >= 0.9) return { background: "rgba(42,161,152,0.14)", borderBottom: "1px solid rgba(42,161,152,0.5)", paddingBottom: 1 };
+  if (conf >= 0.8) return { background: "rgba(181,137,0,0.13)", borderBottom: "1px solid rgba(181,137,0,0.45)", paddingBottom: 1 };
+  return { background: "rgba(203,75,22,0.10)", borderBottom: "1px solid rgba(203,75,22,0.40)", paddingBottom: 1 };
 }
 
 // ─── Sub-components ───────────────────────────────────────────
 
 /** Inline PDF page viewer with optional page navigation. */
 function PdfViewer({ url, page }: { url: string; page: number }) {
-  const [numPages, setNumPages]   = useState<number | null>(null);
-  const [currentPage, setPage]    = useState(page);
+  const [numPages, setNumPages] = useState<number | null>(null);
+  const [currentPage, setPage] = useState(page);
   const [loadError, setLoadError] = useState<string | null>(null);
   return (
     <div className="pdf-viewer-container">
@@ -273,10 +273,10 @@ export default function QueryPane({
   externalFill?: string;
   onQueryComplete?: (query: string, hitCount: number) => void;
 }) {
-  const [query, setQuery]               = useState("");
-  const [expandedResult, setExpanded]   = useState<string | number | null>(null);
+  const [query, setQuery] = useState("");
+  const [expandedResult, setExpanded] = useState<string | number | null>(null);
   const [displayCount, setDisplayCount] = useState(3);
-  const [showFilters, setShowFilters]   = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const [activeFilters, setActiveFilters] = useState<{ phase: string[]; status: string[]; strategy: string[] }>({
     phase: [], status: [], strategy: [],
   });
@@ -287,16 +287,16 @@ export default function QueryPane({
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Vertical split: top (results) / bottom (provenance + graph)
-  const [splitPct, setSplitPct]   = useState(60);
+  const [splitPct, setSplitPct] = useState(60);
   const [vDragging, setVDragging] = useState(false);
-  const vDragStartY               = useRef(0);
-  const vDragStartPct             = useRef(60);
-  const contentRef                = useRef<HTMLDivElement>(null);
+  const vDragStartY = useRef(0);
+  const vDragStartPct = useRef(60);
+  const contentRef = useRef<HTMLDivElement>(null);
   // Track executed query for onQueryComplete notification
-  const lastRanQuery              = useRef<string>("");
-  const lastNotifiedQ             = useRef<string>("");
+  const lastRanQuery = useRef<string>("");
+  const lastNotifiedQ = useRef<string>("");
   // Track last external fill to avoid re-firing on same value
-  const lastExternalFill          = useRef<string | undefined>(undefined);
+  const lastExternalFill = useRef<string | undefined>(undefined);
 
   // Live API state via polling hook
   const {
@@ -331,9 +331,9 @@ export default function QueryPane({
   function filteredResults(): TrialResult[] {
     const source = liveResults;
     return source.filter((r) => {
-      if (activeFilters.phase.length    > 0 && !activeFilters.phase.includes(r.phase))              return false;
-      if (activeFilters.status.length   > 0 && !activeFilters.status.includes(r.enrollmentStatus))  return false;
-      if (activeFilters.strategy.length > 0 && !activeFilters.strategy.includes(r.strategy))        return false;
+      if (activeFilters.phase.length > 0 && !activeFilters.phase.includes(r.phase)) return false;
+      if (activeFilters.status.length > 0 && !activeFilters.status.includes(r.enrollmentStatus)) return false;
+      if (activeFilters.strategy.length > 0 && !activeFilters.strategy.includes(r.strategy)) return false;
       return true;
     });
   }
@@ -380,7 +380,7 @@ export default function QueryPane({
       lastNotifiedQ.current = lastRanQuery.current;
       onQueryComplete?.(lastRanQuery.current, liveResults.length);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryState, liveResults.length]);
 
   // Collapse synthesis when a new query starts
@@ -406,14 +406,14 @@ export default function QueryPane({
 
   function onVDragStart(e: React.MouseEvent) {
     e.preventDefault();
-    vDragStartY.current    = e.clientY;
-    vDragStartPct.current  = splitPct;
+    vDragStartY.current = e.clientY;
+    vDragStartPct.current = splitPct;
     setVDragging(true);
   }
 
-  const results        = filteredResults();
+  const results = filteredResults();
   const visibleResults = results.slice(0, displayCount);
-  const hasMore        = displayCount < results.length;
+  const hasMore = displayCount < results.length;
   const anyFilterActive = Object.values(activeFilters).some((a) => a.length > 0);
   const selectedForProvenance = results.find((r) => r.id === expandedResult) ?? results[0];
 
@@ -742,7 +742,7 @@ export default function QueryPane({
           {/* Entity Graph half */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <div style={{ padding: "4px 12px 3px", borderBottom: "1px solid var(--border-dim)", background: "var(--surface-1)", flexShrink: 0 }}>
-              <span className="section-label" style={{ margin: 0 }}>ENTITY GRAPH</span>
+              <span className="section-label" style={{ margin: 0 }}>ENTITY RELATIONSHIP </span>
             </div>
             <div style={{ flex: 1, overflow: "hidden" }}>
               <GraphPanel />
@@ -771,9 +771,9 @@ export default function QueryPane({
         ) : (
           <>
             {([
-              ["HITS",     queryState === "results" ? String(liveMeta?.totalHits ?? results.length) : "—"],
-              ["LATENCY",  queryState === "results" && liveMeta ? `${liveMeta.latencyMs}ms` : "—"],
-              ["INDEX",    liveMeta?.indexVersion ?? "—"],
+              ["HITS", queryState === "results" ? String(liveMeta?.totalHits ?? results.length) : "—"],
+              ["LATENCY", queryState === "results" && liveMeta ? `${liveMeta.latencyMs}ms` : "—"],
+              ["INDEX", liveMeta?.indexVersion ?? "—"],
               ["STRATEGY", liveMeta?.strategy ?? "—"],
             ] as [string, string][]).map(([label, val]) => (
               <span key={label} className="status-chip">
