@@ -174,7 +174,7 @@ def main() -> None:
             time.sleep(delay)
 
     print(f"\n{'='*60}")
-    print(f"  Finished.")
+    print("  Finished.")
     print(f"  Total unique PDFs fetched : {total_succeeded}")
     print(f"  Unique arxiv IDs          : {len(seen_ids)}")
     print(f"  Keywords exhausted        : {total_succeeded < target}")

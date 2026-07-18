@@ -87,7 +87,7 @@ class AzureBlobStorageProvider(BaseStorageProvider):
         """Initialize Azure Blob client."""
         global azure_storage_blob
         try:
-            from azure.storage.blob import BlobServiceClient, ContainerClient
+            from azure.storage.blob import BlobServiceClient
             azure_storage_blob = BlobServiceClient
         except ImportError:
             raise ImportError(
