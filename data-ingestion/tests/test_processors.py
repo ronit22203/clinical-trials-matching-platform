@@ -113,7 +113,7 @@ Treatment showed 50% improvement compared to placebo.
     
     print(f"Original length: {len(sample_text)} characters")
     print(f"Cleaned length:  {len(cleaned)} characters")
-    print(f"\nFirst 500 chars of cleaned text:")
+    print("\nFirst 500 chars of cleaned text:")
     print("-" * 60)
     print(cleaned[:500])
     print("-" * 60)

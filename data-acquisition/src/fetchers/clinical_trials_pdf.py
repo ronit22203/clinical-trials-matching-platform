@@ -10,7 +10,6 @@ Fetches protocol and results PDFs from ClinicalTrials.gov with:
 
 import asyncio
 import logging
-import random
 import time
 from datetime import datetime
 from pathlib import Path

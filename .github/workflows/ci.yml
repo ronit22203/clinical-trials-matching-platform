@@ -10,7 +10,9 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      python: ${{ steps.filter.outputs.python }}
+      data-acquisition: ${{ steps.filter.outputs.data-acquisition }}
+      data-ingestion: ${{ steps.filter.outputs.data-ingestion }}
+      agentic-reasoning: ${{ steps.filter.outputs.agentic-reasoning }}
       ui: ${{ steps.filter.outputs.ui }}
     steps:
       - uses: actions/checkout@v4
@@ -18,26 +20,40 @@ jobs:
         id: filter
         with:
           filters: |
-            python:
+            data-acquisition:
               - 'data-acquisition/**'
+            data-ingestion:
               - 'data-ingestion/**'
+            agentic-reasoning:
               - 'agentic-reasoning/**'
             ui:
-              - 'platform-ui/**'
+              - 'palantir-blueprint/**'
 
   python-lint-test:
     needs: changes
-    if: needs.changes.outputs.python == 'true'
+    if: |
+      needs.changes.outputs['data-acquisition'] == 'true' ||
+      needs.changes.outputs['data-ingestion'] == 'true' ||
+      needs.changes.outputs['agentic-reasoning'] == 'true'
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        module: [data-acquisition, data-ingestion, agentic-reasoning]
+        include:
+          - module: data-acquisition
+            changed: ${{ needs.changes.outputs['data-acquisition'] }}
+          - module: data-ingestion
+            changed: ${{ needs.changes.outputs['data-ingestion'] }}
+          - module: agentic-reasoning
+            changed: ${{ needs.changes.outputs['agentic-reasoning'] }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        if: matrix.changed == 'true'
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Install deps
+        if: matrix.changed == 'true'
         working-directory: ${{ matrix.module }}
         run: |
           python -m pip install --upgrade pip
@@ -45,9 +61,11 @@ jobs:
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install ruff pytest
       - name: Lint (ruff)
+        if: matrix.changed == 'true'
         working-directory: ${{ matrix.module }}
         run: ruff check .
       - name: Unit tests (no live DB/docker)
+        if: matrix.changed == 'true'
         working-directory: ${{ matrix.module }}
         run: pytest -m "not integration" --tb=short
 
@@ -57,16 +75,15 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: platform-ui
+        working-directory: palantir-blueprint
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "20"
           cache: "npm"
-          cache-dependency-path: platform-ui/package-lock.json
-      - run: npm ci
-      - run: npm run lint
+          cache-dependency-path: palantir-blueprint/package-lock.json
+      - run: npm ci --legacy-peer-deps
       - run: npm run build
 
   # Single job every PR can require in branch protection,

@@ -5,13 +5,10 @@ Tests the fallback storage configuration using the actual Azure storage account.
 """
 
 import os
-from datetime import datetime
-from pathlib import Path
 
 import pytest
 
 from azure.storage.blob import BlobServiceClient
-from azure.core.exceptions import ResourceNotFoundError
 
 
 pytestmark = pytest.mark.azure
@@ -20,6 +17,7 @@ pytestmark = pytest.mark.azure
 class TestAzureBlobConnection:
     """Test Azure Blob storage connectivity."""
 
+    @pytest.mark.integration
     def test_connection_string_format(self, azure_blob_config):
         """Verify connection string is properly configured."""
         conn_string = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", "")

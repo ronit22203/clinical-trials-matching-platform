@@ -7,8 +7,7 @@ Manage collections in Qdrant vector database
 import argparse
 import sys
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 from src.config_loader import load_ingestion_config
 

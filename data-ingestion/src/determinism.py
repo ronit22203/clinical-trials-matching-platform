@@ -18,7 +18,7 @@ import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 PROJECT_ROOT = Path(__file__).parent.parent
 REPO_ROOT = Path(__file__).resolve().parents[2]

@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
-from src.agent import Agent, RunResult, _format_evidence, _NO_EVIDENCE_RESPONSE
+from src.agent import Agent, _format_evidence, _NO_EVIDENCE_RESPONSE
 from src.config import AgentConfig, GraphRAGConfig, ModelParams
 
 
@@ -165,7 +164,7 @@ class TestRunResult:
     def test_run_json_serialisable(self):
         agent = _make_agent(EVIDENCE_WITH_RESULTS)
         data = agent.run_json("query")
-        serialised = json.dumps(data)  # must not raise
+        json.dumps(data)  # must not raise
         assert "synthesis" in data
         assert "evidence" in data
         assert "found" in data

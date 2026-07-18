@@ -151,7 +151,7 @@ class S3StorageProvider(BaseStorageProvider):
 
             # Upload file
             with open(file_path, "rb") as f:
-                response = self._client.upload_fileobj(f, self.bucket, full_key, ExtraArgs=extra_args)
+                self._client.upload_fileobj(f, self.bucket, full_key, ExtraArgs=extra_args)
 
             # Get ETag
             head_response = self._client.head_object(Bucket=self.bucket, Key=full_key)

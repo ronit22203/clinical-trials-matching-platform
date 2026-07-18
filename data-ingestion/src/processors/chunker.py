@@ -1,5 +1,5 @@
 import re
-from typing import List, Dict, Any
+from typing import List, Dict
 
 # Patterns that mark a chunk as a preprint header/footer watermark.
 # Each entry is a compiled case-insensitive pattern; matching ANY of them

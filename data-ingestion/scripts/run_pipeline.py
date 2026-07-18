@@ -5,7 +5,6 @@ Orchestrates the complete pipeline:
   PDF -> Surya OCR (_ocr.json) -> Converter (_converted.md) -> Cleaner (_cleaned.md) -> Chunker (_chunks.json) -> Vectorizer
 """
 
-import os
 import sys
 import argparse
 import logging
@@ -149,7 +148,7 @@ class MedicalDataPipeline:
         self.log_header("Medical Data Ingestion Pipeline Started")
         self.logger.info(f"Config: {self.config_path}")
         self.logger.info(f"Input:  {self.input_dir}")
-        self.logger.info(f"Pipeline outputs:")
+        self.logger.info("Pipeline outputs:")
         self.logger.info(f"  OCR:      {self.ocr_dir}")
         self.logger.info(f"  Markdown: {self.markdown_dir}")
         self.logger.info(f"  Cleaned:  {self.cleaned_dir}")
@@ -241,49 +240,49 @@ class MedicalDataPipeline:
                     if ocr_json_path.exists():
                         self.logger.info(f"  Stage 1/5: OCR skipped (already exists: {ocr_json_path.name})")
                     else:
-                        self.logger.info(f"  Stage 1/5: PDF → OCR JSON (Surya)")
+                        self.logger.info("  Stage 1/5: PDF → OCR JSON (Surya)")
                         ocr_json_path = self._stage1_ocr(pdf_file, filename)
                         self.logger.info(f"  ✓ OCR complete: {ocr_json_path.name}")
                         self.tracker.record_stage(exec_uuid, "extract",
                                                   ocr_json_path.read_text(encoding="utf-8"),
                                                   artifact_ext="json")
                 else:
-                    self.logger.info(f"  Stage 1/5: Skipped (--skip-ocr)")
+                    self.logger.info("  Stage 1/5: Skipped (--skip-ocr)")
                 
                 # Stage 2: OCR JSON to Markdown (Surya Converter)
                 if not skip_convert:
-                    self.logger.info(f"  Stage 2/5: OCR JSON → Markdown")
+                    self.logger.info("  Stage 2/5: OCR JSON → Markdown")
                     converted_md_path = self._stage2_convert(ocr_json_path, filename)
                     self.logger.info(f"  ✓ Conversion complete: {converted_md_path.name}")
                     self.tracker.record_stage(exec_uuid, "convert",
                                               converted_md_path.read_text(encoding="utf-8"),
                                               artifact_ext="md")
                 else:
-                    self.logger.info(f"  Stage 2/5: Skipped (--skip-convert)")
+                    self.logger.info("  Stage 2/5: Skipped (--skip-convert)")
                     converted_md_path = self.markdown_dir / f"{filename}_converted.md"
                 
                 # Stage 3: Clean Markdown
                 if not skip_clean:
-                    self.logger.info(f"  Stage 3/5: Markdown → Cleaned")
+                    self.logger.info("  Stage 3/5: Markdown → Cleaned")
                     cleaned_md_path = self._stage3_clean(converted_md_path, filename)
                     self.logger.info(f"  ✓ Cleaning complete: {cleaned_md_path.name}")
                     self.tracker.record_stage(exec_uuid, "clean",
                                               cleaned_md_path.read_text(encoding="utf-8"),
                                               artifact_ext="md")
                 else:
-                    self.logger.info(f"  Stage 3/5: Skipped (--skip-clean)")
+                    self.logger.info("  Stage 3/5: Skipped (--skip-clean)")
                     cleaned_md_path = self.cleaned_dir / f"{filename}_cleaned.md"
                 
                 # Stage 4: Chunk Markdown
                 if not skip_chunk:
-                    self.logger.info(f"  Stage 4/5: Markdown → Chunks")
+                    self.logger.info("  Stage 4/5: Markdown → Chunks")
                     chunks_json_path = self._stage4_chunk(cleaned_md_path, filename)
                     self.logger.info(f"  ✓ Chunking complete: {chunks_json_path.name}")
                     self.tracker.record_stage(exec_uuid, "chunk",
                                               chunks_json_path.read_text(encoding="utf-8"),
                                               artifact_ext="json")
                 else:
-                    self.logger.info(f"  Stage 4/5: Skipped (--skip-chunk)")
+                    self.logger.info("  Stage 4/5: Skipped (--skip-chunk)")
                 
                 exec_status = "completed"
                 successful += 1
@@ -523,7 +522,7 @@ class MedicalDataPipeline:
     
     def _stage5_vectorize(self):
         """Stage 5: Vectorize all cleaned documents"""
-        self.logger.info(f"  • Initializing vectorizer...")
+        self.logger.info("  • Initializing vectorizer...")
         vectorizer = MedicalVectorizer(config=self.config)
         
         self.logger.info(f"  • Model: {self.config.get('vectorization', {}).get('model_name', 'BAAI/bge-small-en-v1.5')}")
@@ -533,7 +532,7 @@ class MedicalDataPipeline:
         
         self.logger.info(f"  • Processing: {self.cleaned_dir}")
         vectorizer.run(str(self.cleaned_dir))
-        self.logger.info(f"  ✓ Vectorization complete")
+        self.logger.info("  ✓ Vectorization complete")
 
 
     def _stage6_knowledge_graph(self):

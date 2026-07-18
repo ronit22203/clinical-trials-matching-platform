@@ -26,6 +26,10 @@ dependencies = [
 [project.scripts]
 clinical-agents = "src.cli:main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"

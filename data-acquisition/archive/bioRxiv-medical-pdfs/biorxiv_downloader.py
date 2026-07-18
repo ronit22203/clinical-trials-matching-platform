@@ -11,13 +11,12 @@ import argparse
 import hashlib
 import json
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import arxiv
 import requests
-from medical_keywords import MEDICAL_KEYWORDS, ALL_MEDICAL_KEYWORDS
+from medical_keywords import MEDICAL_KEYWORDS
 
 
 class BioRxivDownloader:

@@ -1,6 +1,6 @@
 import re
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -86,7 +86,8 @@ class TextCleaner:
         4. Collapse whitespace
         5. Remove/anonymize PII
         """
-        if not text: return ""
+        if not text:
+            return ""
 
         # 1. Remove phantom images from Marker
         text = re.sub(r'!\[.*?\]\(.*?\)', '', text) 

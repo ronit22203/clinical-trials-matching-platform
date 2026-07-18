@@ -26,7 +26,7 @@ if __name__ == "__main__":
         print("\nInitializing MedicalVectorizer...")
         vectorizer = MedicalVectorizer(config=config)
         
-        print(f"✓ Embedding model initialized")
+        print("✓ Embedding model initialized")
         print(f"  - Model: {config['vectorization']['model_name']}")
         print(f"  - Embedding dimension: {vectorizer.embedding_dim}")
         print(f"  - Qdrant collection: {vectorizer.collection_name}")
@@ -43,7 +43,7 @@ if __name__ == "__main__":
             print("  2. Markdown files will be in ../data/artifacts/markdown/")
         else:
             print(f"\n✓ Found {len(md_files)} markdown file(s) in {interim_dir}")
-            print(f"\nProcessing files...")
+            print("\nProcessing files...")
             
             # Run vectorizer on markdown files
             vectorizer.run(str(interim_dir))

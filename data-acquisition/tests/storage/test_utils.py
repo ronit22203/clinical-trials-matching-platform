@@ -5,8 +5,6 @@ Provides utility functions for storage testing across AWS, Azure, and local prov
 """
 
 import hashlib
-import json
-import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,7 +13,6 @@ from typing import Any, Dict, List, Optional
 
 import boto3
 from azure.storage.blob import BlobServiceClient, ContainerClient
-from botocore.exceptions import ClientError
 
 
 @dataclass
@@ -83,7 +80,7 @@ class StorageTestUtils:
             result = func(*args, **kwargs)
             duration = (time.perf_counter() - start) * 1000
             return result, duration
-        except Exception as e:
+        except Exception:
             duration = (time.perf_counter() - start) * 1000
             raise
 

@@ -8,7 +8,6 @@ import os
 import json
 import shutil
 from pathlib import Path
-from datetime import datetime
 
 import pytest
 
@@ -211,8 +210,6 @@ class TestLocalDiskSpace:
 
     def test_check_disk_space(self, temp_dir: Path):
         """Test checking available disk space."""
-        import os
-        import shutil
 
         # Get disk usage
         usage = shutil.disk_usage(temp_dir)
@@ -223,7 +220,6 @@ class TestLocalDiskSpace:
 
     def test_alert_on_low_disk_space(self, temp_dir: Path):
         """Test disk space alert threshold."""
-        import shutil
 
         usage = shutil.disk_usage(temp_dir)
         percent_used = (usage.used / usage.total) * 100

@@ -1,5 +1,3 @@
-import logging
-from qdrant_client import QdrantClient
 from src.storage.embedder import MedicalVectorizer
 
 # Setup

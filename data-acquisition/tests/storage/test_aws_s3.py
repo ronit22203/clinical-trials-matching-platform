@@ -4,15 +4,12 @@ Integration tests for AWS S3 storage.
 Tests the primary storage configuration using S3 directory buckets.
 """
 
-import os
 import json
-from pathlib import Path
-from datetime import datetime
 
 import pytest
 
 import boto3
-from botocore.exceptions import ClientError, NoCredentialsError
+from botocore.exceptions import ClientError, NoCredentialsError, ProfileNotFound
 
 
 pytestmark = pytest.mark.aws
@@ -58,6 +55,7 @@ class TestS3Connection:
             pytest.skip("AWS credentials not available")
 
 
+@pytest.mark.integration
 class TestS3BucketOperations:
     """Test S3 bucket operations."""
 

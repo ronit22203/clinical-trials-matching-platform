@@ -810,7 +810,7 @@ data_acquisition:
         default: true
 agentic_reasoning:
   agent:
-    model: lmstudio/qwen3-8b
+    model: sglang/Qwen/Qwen2.5-7B-Instruct
     system_prompt: >-
       You are a clinical research assistant with access to an internal knowledge base.
       You operate in a two-phase pipeline: evidence is always retrieved before you respond.

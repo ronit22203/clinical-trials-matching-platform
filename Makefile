@@ -9,14 +9,40 @@ RED    := \033[31m
 BOLD   := \033[1m
 NC     := \033[0m
 
-REASONING_DIR := agentic-reasoning
+REASONING_DIR   := agentic-reasoning
 ACQUISITION_DIR := data-acquisition
-INGESTION_DIR := data-ingestion
+INGESTION_DIR   := data-ingestion
 BENCHMARKING_DIR := benchmarking
-CONFIG_FILE := config/app.yaml
+BLUEPRINT_DIR   := palantir-blueprint
+INFERENCE_DIR   := core-llm-inference
+CONFIG_FILE     := config/app.yaml
 
-REASONING_PYTHON := .venv/bin/python
+REASONING_PYTHON   := .venv/bin/python
 ACQUISITION_PYTHON := .venv/bin/python
+INGESTION_PYTHON   := .venv/bin/python
+INFERENCE_CLI      := $(INFERENCE_DIR)/.venv/bin/core-llm-inference
+INFERENCE_PYTHON   := $(INFERENCE_DIR)/.venv/bin/python
+
+# --- [ Workspace storage redirect ] -------------------------------------------
+# When /workspace is mounted (RunPod, Colab, etc.) redirect pip cache + tmp there
+# to avoid exhausting the small root overlay filesystem during GPU package installs.
+WORKSPACE         ?= $(if $(wildcard /workspace),/workspace,)
+PIP_CACHE_FLAGS   := $(if $(WORKSPACE),--cache-dir $(WORKSPACE)/pip-cache,)
+PIP_TMPDIR_EXPORT := $(if $(WORKSPACE),TMPDIR=$(WORKSPACE)/pip-tmp,)
+
+# Inference server defaults (override via env or CLI)
+INFERENCE_MODEL ?= Qwen/Qwen2.5-7B-Instruct
+INFERENCE_PORT  ?= 30000
+INFERENCE_HOST  ?= 0.0.0.0
+
+# Docker image coordinates (GHCR)
+INFERENCE_IMAGE_REPO   ?= ghcr.io/ronit22203/clinical-trials-inference
+INFERENCE_IMAGE_TAG    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo latest)
+INFERENCE_IMAGE        := $(INFERENCE_IMAGE_REPO):$(INFERENCE_IMAGE_TAG)
+INFERENCE_IMAGE_LATEST := $(INFERENCE_IMAGE_REPO):latest
+
+# Ollama fallback — model name uses Ollama's registry format (not HuggingFace path)
+INFERENCE_MODEL_OLLAMA ?= qwen2.5:7b
 
 SOURCE ?= medrxiv
 MAX_PDFS ?= 2
@@ -59,10 +85,15 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	deterministic-run _det-ingest-timed _det-graph-timed _det-finalize \
 	clean clean-all clean-artifacts clean-ocr clean-md clean-chunks clean-vectors clean-graph clean-hard \
 	dev \
+	inference-install inference-serve inference-serve-fg inference-stop \
+	inference-status inference-benchmark inference-benchmark-all \
+	inference-docker-build inference-docker-push inference-docker-run inference-docker-stop \
+	inference-ollama-install inference-ollama-serve \
 	reasoning-install reasoning-clean reasoning-test reasoning-run reasoning-run-query reasoning-serve \
 	reasoning-graphrag-up reasoning-graphrag-down \
 	reasoning-download-models reasoning-sglang-run reasoning-sglang-run-query \
 	simple-ui-serve \
+	blueprint-install blueprint-dev blueprint-build blueprint-preview blueprint-clean \
 	acquisition-install acquisition-test acquisition-fetch acquisition-source-validate \
 	acquisition-source-search acquisition-source-fetch \
 	ingestion-install ingestion-api ingestion-test ingestion-test-processors ingestion-test-embedder \
@@ -71,6 +102,7 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	ingestion-neo4j-build ingestion-neo4j-delete ingestion-neo4j-stats \
 	ingestion-list-documents ingestion-list-executions ingestion-compare-runs \
 	ingestion-clean ingestion-clean-all \
+	install-lightweight install-gpu-runtimes \
 	test-suite
 
 help: ## Show all root orchestration targets
@@ -119,25 +151,42 @@ validate: ## Check env file, LM Studio, Qdrant, and Neo4j connectivity
 		printf "$(GREEN)$(BOLD)All checks passed$(NC)\n"; \
 	'
 
-up: ## Start shared infrastructure and API/UI services
-	@docker compose -f docker-compose.local.yml up -d
+up: ## Start Neo4j + Qdrant (Docker if available, else native binaries via shell/start_services.sh)
+	@if docker info >/dev/null 2>&1; then \
+		docker compose -f docker-compose.local.yml up -d; \
+	else \
+		bash shell/start_services.sh; \
+	fi
 
-down: ## Stop shared infrastructure and API/UI services
-	@docker compose -f docker-compose.local.yml down
+down: ## Stop Neo4j + Qdrant (Docker if available, else shell/stop_services.sh)
+	@if docker info >/dev/null 2>&1; then \
+		docker compose -f docker-compose.local.yml down; \
+	else \
+		bash shell/stop_services.sh; \
+	fi
 
 serve: ## Start the reasoning agent in interactive CLI mode
 	@$(MAKE) --no-print-directory reasoning-run
 
-dev: ## ★ Start all services: reasoning API (:8000), ingestion API (:8001), simple-ui (:3000)
+dev-kill: ## Kill any stale processes on :8000, :8001, :5173
+	@for port in 8000 8001 5173; do \
+	  pids=$$(lsof -ti tcp:$$port 2>/dev/null); \
+	  if [ -n "$$pids" ]; then \
+	    printf "$(YELLOW)Killing stale process(es) on :$$port → PID $$pids$(NC)\n"; \
+	    kill -9 $$pids 2>/dev/null || true; \
+	  fi; \
+	done; sleep 0.5
+
+dev: dev-kill ## ★ Start all services: reasoning API (:8000), ingestion API (:8001), blueprint UI (:5173)
 	@printf "$(BOLD)$(GREEN)Starting all services…$(NC)\n"
 	@printf "  Reasoning API  → $(CYAN)http://localhost:8000$(NC)\n"
 	@printf "  Ingestion API  → $(CYAN)http://localhost:8001$(NC)\n"
-	@printf "  Simple UI      → $(CYAN)http://localhost:3000$(NC)\n\n"
+	@printf "  Blueprint UI   → $(CYAN)http://localhost:5173$(NC)\n\n"
 	@printf "  Press $(BOLD)Ctrl+C$(NC) to stop all services.\n\n"
-	@trap 'kill 0' INT; \
+	@trap 'kill 0' INT TERM; \
 	 (cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --port 8000 --reload 2>&1 | sed 's/^/[reasoning] /') & \
-	 (cd $(INGESTION_DIR) && python3 -m uvicorn src.api.server:app --port 8001 --reload 2>&1 | sed 's/^/[ingestion] /') & \
-	 (python3 -m http.server 3000 --directory simple-ui 2>&1 | sed 's/^/[ui]        /') & \
+	 (cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m uvicorn src.api.server:app --port 8001 --reload 2>&1 | sed 's/^/[ingestion] /') & \
+	 (cd $(BLUEPRINT_DIR) && npm run dev 2>&1 | sed 's/^/[blueprint] /') & \
 	 wait
 
 fetch: acquisition-fetch ## Fetch PDFs via data-acquisition
@@ -145,7 +194,7 @@ fetch: acquisition-fetch ## Fetch PDFs via data-acquisition
 ingest: ## Run ingestion pipeline then build knowledge graph (N=<max-pdfs>)
 	@printf "$(BLUE)Starting Ingestion Pipeline (N=$(N))...$(NC)\n"
 	@cd $(INGESTION_DIR) && \
-		python3 scripts/run_pipeline.py --config ../$(CONFIG_FILE) --max-pdfs "$(N)" --skip-graph $(if $(SKIP),--skip-$(SKIP),)
+		$(INGESTION_PYTHON) scripts/run_pipeline.py --config ../$(CONFIG_FILE) --max-pdfs "$(N)" --skip-graph $(if $(SKIP),--skip-$(SKIP),)
 	@printf "$(BLUE)Building Neo4j knowledge graph...$(NC)\n"
 	@$(MAKE) --no-print-directory ingestion-neo4j-build
 	@printf "$(GREEN)$(BOLD)Ingestion complete.$(NC)\n"
@@ -156,7 +205,7 @@ benchmark-sepsis: ## Run the Sepsis Falsification paper through the full pipelin
 	 mkdir -p data/pdfs/benchmarks; \
 	 cp "$$SPDF" data/pdfs/benchmarks/sepsis_falsification.pdf; \
 	 printf "$(YELLOW)Running Falsification Benchmark on Sepsis Models...$(NC)\n"; \
-	 cd $(INGESTION_DIR) && python3 scripts/run_pipeline.py --config ../$(CONFIG_FILE) \
+	 cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/run_pipeline.py --config ../$(CONFIG_FILE) \
 		--input-dir ../data/pdfs/benchmarks --skip-graph
 	@$(MAKE) --no-print-directory ingestion-neo4j-build
 	@$(MAKE) --no-print-directory reasoning-run-query \
@@ -284,7 +333,7 @@ deterministic-run: ## ★ Full deterministic pipeline → single manifest.json (
 
 _det-ingest-timed: ## [internal] Run ingestion pipeline on the golden PDF, record elapsed time
 	@T0=$$(date +%s); \
-	 cd $(INGESTION_DIR) && python3 scripts/run_pipeline.py \
+	 cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/run_pipeline.py \
 	     --config ../$(CONFIG_FILE) \
 	     --input-dir "../$(BENCH_PDF_DIR)" \
 	     --max-pdfs 1 \
@@ -297,7 +346,7 @@ _det-ingest-timed: ## [internal] Run ingestion pipeline on the golden PDF, recor
 
 _det-graph-timed: ## [internal] Build Neo4j KG from chunks, record elapsed time
 	@T0=$$(date +%s); \
-	 cd $(INGESTION_DIR) && python3 scripts/build_knowledge_graph.py \
+	 cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/build_knowledge_graph.py \
 	     --config ../$(CONFIG_FILE); \
 	 T1=$$(date +%s); ELAPSED=$$((T1-T0)); \
 	 printf '{"stage":"graph","elapsed_s":%d}\n' "$$ELAPSED" \
@@ -354,7 +403,7 @@ clean-graph: ingestion-neo4j-delete ## Delete all Neo4j graph data
 
 reasoning-install: ## Create reasoning venv if needed and install editable package
 	@cd $(REASONING_DIR) && \
-		([ -x $(REASONING_PYTHON) ] || python3 -m venv .venv) && \
+		([ -x $(REASONING_PYTHON) ] || python3.12 -m venv .venv) && \
 		$(REASONING_PYTHON) -m pip install -e .
 
 reasoning-clean: ## Remove reasoning caches and logs
@@ -381,6 +430,32 @@ reasoning-serve: ## Start reasoning HTTP API server on :8000
 simple-ui-serve: ## Serve the simple-ui on :3000
 	@python3 -m http.server 3000 --directory simple-ui
 
+# --- [ Blueprint UI ] ---------------------------------------------------------
+
+blueprint-install: ## Install palantir-blueprint npm dependencies
+	@printf "$(BLUE)Installing blueprint UI dependencies…$(NC)\n"
+	@cd $(BLUEPRINT_DIR) && npm install
+	@printf "$(GREEN)blueprint-install done.$(NC)\n"
+
+blueprint-dev: ## Start blueprint Vite dev server on :5173 (hot-reload, RunPod-ready)
+	@printf "$(BLUE)Starting blueprint dev server → $(CYAN)http://localhost:5173$(NC)\n"
+	@printf "$(YELLOW)On RunPod: https://{pod-id}-5173.proxy.runpod.net$(NC)\n"
+	@cd $(BLUEPRINT_DIR) && npm run dev
+
+blueprint-build: ## Production build of blueprint UI → palantir-blueprint/dist/
+	@printf "$(BLUE)Building blueprint UI…$(NC)\n"
+	@cd $(BLUEPRINT_DIR) && npm run build
+	@printf "$(GREEN)$(BOLD)blueprint-build done → $(BLUEPRINT_DIR)/dist/$(NC)\n"
+
+blueprint-preview: blueprint-build ## Build then preview production bundle on :4173
+	@printf "$(BLUE)Previewing blueprint production build → $(CYAN)http://localhost:4173$(NC)\n"
+	@cd $(BLUEPRINT_DIR) && npm run preview
+
+blueprint-clean: ## Remove blueprint node_modules and dist
+	@printf "$(YELLOW)Removing $(BLUEPRINT_DIR)/node_modules and dist…$(NC)\n"
+	@rm -rf $(BLUEPRINT_DIR)/node_modules $(BLUEPRINT_DIR)/dist
+	@printf "$(GREEN)blueprint-clean done.$(NC)\n"
+
 reasoning-graphrag-up: ## Start GraphRAG backing services (Qdrant + Neo4j)
 	@cd $(REASONING_DIR) && docker compose -p clinical_agents -f infra/docker-compose.graphrag.yml up -d
 
@@ -396,9 +471,132 @@ reasoning-sglang-run: ## Run the reasoning CLI against SGLang (interactive)
 reasoning-sglang-run-query: ## Run one reasoning query against SGLang (QUERY=...)
 	@cd $(REASONING_DIR) && SGLANG_BASE_URL=http://localhost:30000/v1 $(REASONING_PYTHON) -m src query "$(QUERY)"
 
+# --- [ core-llm-inference — SGLang production inference ] ---------------------
+
+inference-install: ## Install core-llm-inference venv + torch cu124 + sglang[all] (L4/Ubuntu)
+	@printf "$(CYAN)Setting up core-llm-inference (.venv)…$(NC)\n"
+	$(if $(WORKSPACE),@mkdir -p $(WORKSPACE)/pip-cache $(WORKSPACE)/pip-tmp,)
+	@cd $(INFERENCE_DIR) && \
+		([ -d .venv ] || python3.12 -m venv .venv) && \
+		.venv/bin/pip install --quiet --upgrade pip && \
+		$(PIP_TMPDIR_EXPORT) .venv/bin/pip install --quiet torch \
+			$(PIP_CACHE_FLAGS) \
+			--extra-index-url https://download.pytorch.org/whl/cu124 && \
+		$(PIP_TMPDIR_EXPORT) .venv/bin/pip install --quiet "sglang[all]" \
+			$(PIP_CACHE_FLAGS) \
+			--find-links https://flashinfer.ai/whl/cu124/torch2.4/flashinfer/ \
+			--extra-index-url https://download.pytorch.org/whl/cu124 && \
+		.venv/bin/pip install --quiet -e .
+	@printf "$(GREEN)inference-install done. Run: make inference-serve$(NC)\n"
+
+inference-serve: ## Start SGLang inference server detached on :30000 (MODEL=..., PORT=...)
+	@printf "$(CYAN)Starting SGLang server: $(INFERENCE_MODEL) on :$(INFERENCE_PORT) (detached)$(NC)\n"
+	@$(INFERENCE_CLI) serve \
+		--model "$(INFERENCE_MODEL)" \
+		--host "$(INFERENCE_HOST)" \
+		--port "$(INFERENCE_PORT)" \
+		--detach
+	@printf "$(GREEN)Server starting → http://$(INFERENCE_HOST):$(INFERENCE_PORT)$(NC)\n"
+	@printf "$(YELLOW)Check status: make inference-status$(NC)\n"
+
+inference-serve-fg: ## Start SGLang inference server in foreground (Ctrl-C to stop)
+	@printf "$(CYAN)Starting SGLang server (foreground): $(INFERENCE_MODEL) on :$(INFERENCE_PORT)$(NC)\n"
+	@$(INFERENCE_CLI) serve \
+		--model "$(INFERENCE_MODEL)" \
+		--host "$(INFERENCE_HOST)" \
+		--port "$(INFERENCE_PORT)"
+
+inference-stop: ## Stop background SGLang inference server (kills sglang.launch_server)
+	@printf "$(YELLOW)Stopping SGLang server…$(NC)\n"
+	@pkill -f "sglang.launch_server" 2>/dev/null \
+		&& printf "$(GREEN)SGLang server stopped.$(NC)\n" \
+		|| printf "$(YELLOW)No running SGLang server found.$(NC)\n"
+
+inference-status: ## Check inference server health, loaded model, GPU stats
+	@$(INFERENCE_CLI) status --url "http://$(INFERENCE_HOST):$(INFERENCE_PORT)" --cache
+
+inference-benchmark: ## Benchmark inference (N=10 queries, default category mix)
+	@printf "$(CYAN)Benchmarking inference server (N=$(N) queries)…$(NC)\n"
+	@$(INFERENCE_CLI) benchmark \
+		--url "http://$(INFERENCE_HOST):$(INFERENCE_PORT)" \
+		--queries "$(N)" \
+		--warmup \
+		--gpu l4
+
+inference-benchmark-all: ## Benchmark with all queries + Prometheus push
+	@printf "$(CYAN)Full benchmark run — all queries, warmup enabled…$(NC)\n"
+	@$(INFERENCE_CLI) benchmark \
+		--url "http://$(INFERENCE_HOST):$(INFERENCE_PORT)" \
+		--all-queries \
+		--warmup \
+		--gpu l4 \
+		--prometheus
+
+# --- [ core-llm-inference — Docker pre-baked image ] -------------------------
+# Build once on a machine with local SSD → push to GHCR → pull on RunPod.
+# Eliminates the NFS pip-install bottleneck: `make inference-docker-run` is
+# the zero-install path for RunPod deployments.
+
+inference-docker-build: ## Build pre-baked SGLang inference image and tag it
+	@printf "$(CYAN)Building inference image: $(INFERENCE_IMAGE)$(NC)\n"
+	@docker build \
+		--tag "$(INFERENCE_IMAGE)" \
+		--tag "$(INFERENCE_IMAGE_LATEST)" \
+		"$(INFERENCE_DIR)"
+	@printf "$(GREEN)Build complete: $(INFERENCE_IMAGE)$(NC)\n"
+	@printf "$(YELLOW)Next: make inference-docker-push$(NC)\n"
+
+inference-docker-push: ## Push inference image to GHCR (both SHA tag and :latest)
+	@printf "$(CYAN)Pushing $(INFERENCE_IMAGE)…$(NC)\n"
+	@docker push "$(INFERENCE_IMAGE)"
+	@docker push "$(INFERENCE_IMAGE_LATEST)"
+	@printf "$(GREEN)Pushed to GHCR.$(NC)\n"
+	@printf "$(YELLOW)On RunPod: make inference-docker-run$(NC)\n"
+
+inference-docker-run: ## Pull + run inference container on RunPod (--gpus all, port 30000)
+	@printf "$(CYAN)Launching inference container: $(INFERENCE_MODEL) on :$(INFERENCE_PORT)$(NC)\n"
+	@docker run --detach \
+		--name clinical-inference \
+		--gpus all \
+		--shm-size 32g \
+		-p $(INFERENCE_PORT):$(INFERENCE_PORT) \
+		$(if $(WORKSPACE),-v $(WORKSPACE)/hf-cache:/root/.cache/huggingface,) \
+		-e MODEL_PATH="$(INFERENCE_MODEL)" \
+		-e HOST="$(INFERENCE_HOST)" \
+		-e PORT="$(INFERENCE_PORT)" \
+		"$(INFERENCE_IMAGE_LATEST)"
+	@printf "$(GREEN)Container started → http://$(INFERENCE_HOST):$(INFERENCE_PORT)$(NC)\n"
+	@printf "$(YELLOW)Check status: make inference-status$(NC)\n"
+
+inference-docker-stop: ## Stop and remove the running inference container
+	@printf "$(YELLOW)Stopping inference container…$(NC)\n"
+	@docker stop clinical-inference 2>/dev/null && docker rm clinical-inference 2>/dev/null \
+		&& printf "$(GREEN)Inference container stopped and removed.$(NC)\n" \
+		|| printf "$(YELLOW)No running inference container found.$(NC)\n"
+
+# --- [ core-llm-inference — Ollama fallback (NFS-safe) ] ---------------------
+# Ollama installs as a single ~200MB binary via curl — fast over NFS.
+# Serves models via OpenAI-compatible API on :11434.
+# Use when Docker is unavailable or as a lightweight alternative to SGLang.
+
+inference-ollama-install: ## Install Ollama binary via curl (NFS-safe, ~200MB)
+	@printf "$(CYAN)Installing Ollama…$(NC)\n"
+	@curl -fsSL https://ollama.com/install.sh | sh
+	@printf "$(GREEN)Ollama installed: $$(ollama --version)$(NC)\n"
+
+inference-ollama-serve: ## Start Ollama server + pull model (NFS-safe SGLang alternative)
+	@printf "$(CYAN)Starting Ollama server…$(NC)\n"
+	@nohup ollama serve > /tmp/ollama.log 2>&1 & sleep 3
+	@printf "$(CYAN)Pulling model: $(INFERENCE_MODEL_OLLAMA)$(NC)\n"
+	@ollama pull "$(INFERENCE_MODEL_OLLAMA)"
+	@printf "$(GREEN)Ollama running at http://localhost:11434 with $(INFERENCE_MODEL_OLLAMA)$(NC)\n"
+	@printf "$(YELLOW)To use with the reasoning module, set in config/app.yaml:$(NC)\n"
+	@printf "$(YELLOW)  agent.model: ollama/$(INFERENCE_MODEL_OLLAMA)$(NC)\n"
+	@printf "$(YELLOW)Then run: make reasoning-run$(NC)\n"
+
 acquisition-install: ## Create acquisition venv if needed and install editable package
 	@cd $(ACQUISITION_DIR) && \
-		([ -x $(ACQUISITION_PYTHON) ] || python3 -m venv .venv) && \
+		([ -x $(ACQUISITION_PYTHON) ] || python3.12 -m venv .venv) && \
 		$(ACQUISITION_PYTHON) -m pip install -e .
 
 acquisition-test: ## Run acquisition storage/unit tests
@@ -418,30 +616,34 @@ acquisition-source-fetch: ## Fetch a specific source record (SOURCE=<name> RECOR
 	@test -n "$(RECORD_ID)" || (echo "RECORD_ID is required"; exit 1)
 	@cd $(ACQUISITION_DIR) && $(ACQUISITION_PYTHON) src/fetchers/$(FETCHER_SCRIPT) --source "$(SOURCE)" fetch "$(RECORD_ID)" "$(PDF_TYPE)"
 
-ingestion-install: ## Install ingestion dependencies
-	@cd $(INGESTION_DIR) && python3 -m pip install -r requirements.txt
+ingestion-install: ## Create data-ingestion venv (python3.11) and install dependencies
+	@cd $(INGESTION_DIR) && \
+		([ -x $(INGESTION_PYTHON) ] || python3.11 -m venv .venv) && \
+		$(if $(WORKSPACE),mkdir -p $(WORKSPACE)/pip-cache $(WORKSPACE)/pip-tmp,) \
+		$(PIP_TMPDIR_EXPORT) .venv/bin/pip install --upgrade pip && \
+		$(PIP_TMPDIR_EXPORT) .venv/bin/pip install $(PIP_CACHE_FLAGS) -r requirements.txt
 
 ingestion-api: ## Start ingestion pipeline API server on :8001
-	@cd $(INGESTION_DIR) && python3 -m uvicorn src.api.server:app --port 8001 --reload
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m uvicorn src.api.server:app --port 8001 --reload
 
 ingestion-test: ## Run all ingestion tests
-	@cd $(INGESTION_DIR) && python3 -m pytest tests/ -v
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m pytest tests/ -v
 
 ingestion-test-processors: ## Run ingestion processor tests
-	@cd $(INGESTION_DIR) && python3 tests/test_processors.py
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) tests/test_processors.py
 
 ingestion-test-embedder: ## Run ingestion embedder test
-	@cd $(INGESTION_DIR) && python3 tests/test_embedder.py
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) tests/test_embedder.py
 
 ingestion-test-qdrant: ## Run ingestion Qdrant test
-	@cd $(INGESTION_DIR) && python3 tests/test_qdrant.py
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) tests/test_qdrant.py
 
 ingestion-run: ## Run the ingestion pipeline (N=<max-pdfs> SKIP=<stage>)
 	@cd $(INGESTION_DIR) && \
-		python3 scripts/run_pipeline.py --config ../$(CONFIG_FILE) --max-pdfs "$(N)" $(if $(SKIP),--skip-$(SKIP),)
+		$(INGESTION_PYTHON) scripts/run_pipeline.py --config ../$(CONFIG_FILE) --max-pdfs "$(N)" $(if $(SKIP),--skip-$(SKIP),)
 
 ingestion-inspect: ## Inspect ingestion pipeline outputs
-	@cd $(INGESTION_DIR) && python3 scripts/inspect_pipeline.py
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/inspect_pipeline.py
 
 ingestion-qdrant-up: ## Start Qdrant for ingestion
 	@cd $(INGESTION_DIR) && docker compose -f infra/docker-compose.yaml up -d
@@ -454,40 +656,40 @@ ingestion-qdrant-logs: ## Stream Qdrant logs for ingestion
 
 ingestion-qdrant-clear: ## Clear embeddings from Qdrant
 	@cd $(INGESTION_DIR) && \
-		COLLECTION_NAME="$$(python3 -c 'import yaml; print(yaml.safe_load(open("../$(CONFIG_FILE)", "r", encoding="utf-8"))["data_ingestion"]["vectorization"]["collection_name"])')" && \
-		python3 -m src.storage.qdrant_manager -c ../$(CONFIG_FILE) clear "$$COLLECTION_NAME"
+		COLLECTION_NAME="$$($(INGESTION_PYTHON) -c 'import yaml; print(yaml.safe_load(open("../$(CONFIG_FILE)", "r", encoding="utf-8"))["data_ingestion"]["vectorization"]["collection_name"])')" && \
+		$(INGESTION_PYTHON) -m src.storage.qdrant_manager -c ../$(CONFIG_FILE) clear "$$COLLECTION_NAME"
 
 ingestion-qdrant-delete: ## Delete the Qdrant collection
 	@cd $(INGESTION_DIR) && \
-		COLLECTION_NAME="$$(python3 -c 'import yaml; print(yaml.safe_load(open("../$(CONFIG_FILE)", "r", encoding="utf-8"))["data_ingestion"]["vectorization"]["collection_name"])')" && \
-		python3 -m src.storage.qdrant_manager -c ../$(CONFIG_FILE) delete "$$COLLECTION_NAME"
+		COLLECTION_NAME="$$($(INGESTION_PYTHON) -c 'import yaml; print(yaml.safe_load(open("../$(CONFIG_FILE)", "r", encoding="utf-8"))["data_ingestion"]["vectorization"]["collection_name"])')" && \
+		$(INGESTION_PYTHON) -m src.storage.qdrant_manager -c ../$(CONFIG_FILE) delete "$$COLLECTION_NAME"
 
 ingestion-neo4j-build: ## Build the knowledge graph from chunks
-	@cd $(INGESTION_DIR) && python3 scripts/build_knowledge_graph.py --config ../$(CONFIG_FILE)
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/build_knowledge_graph.py --config ../$(CONFIG_FILE)
 
 ingestion-neo4j-delete: ## Delete all Neo4j knowledge graph data
-	@cd $(INGESTION_DIR) && python3 scripts/delete_knowledge_graph.py --config ../$(CONFIG_FILE)
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/delete_knowledge_graph.py --config ../$(CONFIG_FILE)
 
 ingestion-neo4j-stats: ## Show Neo4j graph statistics
 	@cd $(INGESTION_DIR) && \
-		python3 -c "import sys; sys.path.insert(0, '.'); \
+		$(INGESTION_PYTHON) -c "import sys; sys.path.insert(0, '.'); \
 		from src.config_loader import load_ingestion_config; \
 		from scripts.delete_knowledge_graph import KnowledgeGraphDeleter; \
 		cfg = load_ingestion_config('../$(CONFIG_FILE)'); \
 		d = KnowledgeGraphDeleter(cfg); d.get_graph_stats(); d.close()"
 
 ingestion-list-documents: ## List tracked documents
-	@cd $(INGESTION_DIR) && python3 scripts/compare_executions.py list-documents
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/compare_executions.py list-documents
 
 ingestion-list-executions: ## List executions for DOC=<uuid>
 	@test -n "$(DOC)" || (echo "DOC is required"; exit 1)
-	@cd $(INGESTION_DIR) && python3 scripts/compare_executions.py list-executions --doc "$(DOC)"
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/compare_executions.py list-executions --doc "$(DOC)"
 
 ingestion-compare-runs: ## Compare two executions for DOC=<uuid> EXEC1=<uuid> EXEC2=<uuid>
 	@test -n "$(DOC)" || (echo "DOC is required"; exit 1)
 	@test -n "$(EXEC1)" || (echo "EXEC1 is required"; exit 1)
 	@test -n "$(EXEC2)" || (echo "EXEC2 is required"; exit 1)
-	@cd $(INGESTION_DIR) && python3 scripts/compare_executions.py --doc "$(DOC)" --exec1 "$(EXEC1)" --exec2 "$(EXEC2)"
+	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) scripts/compare_executions.py --doc "$(DOC)" --exec1 "$(EXEC1)" --exec2 "$(EXEC2)"
 
 ingestion-clean: ## Remove ingestion caches and logs
 	@cd $(INGESTION_DIR) && \
@@ -498,3 +700,14 @@ ingestion-clean: ## Remove ingestion caches and logs
 ingestion-clean-all: ingestion-clean ## Remove all ingestion data outputs
 	@rm -rf data/artifacts/extract data/artifacts/convert data/artifacts/clean \
 		data/artifacts/chunk data/artifacts/highlight_cache 2>/dev/null || true
+
+# --- [ Split install targets ] ------------------------------------------------
+
+install-lightweight: reasoning-install acquisition-install blueprint-install ## Install non-GPU components (reasoning, acquisition, blueprint UI) — fast, no large downloads
+	@printf "$(GREEN)$(BOLD)Lightweight install complete.$(NC)\n"
+	@printf "  reasoning API, acquisition, and blueprint UI are ready.\n"
+	@printf "  For GPU runtimes: make install-gpu-runtimes\n"
+
+install-gpu-runtimes: ingestion-install inference-install ## Install GPU-heavy runtimes (inference + ingestion); redirects pip cache/tmp to /workspace when available
+	@printf "$(GREEN)$(BOLD)GPU runtime install complete.$(NC)\n"
+	$(if $(WORKSPACE),@printf "  Pip cache/tmp used: $(WORKSPACE)/pip-{cache,tmp}\n",)

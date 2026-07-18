@@ -975,8 +975,8 @@ class ResultExporter:
             lines += [
                 "## ⚙️ Run Configuration",
                 "",
-                f"| Parameter | Value |",
-                f"|-----------|-------|",
+                "| Parameter | Value |",
+                "|-----------|-------|",
                 f"| Source | `{rc.get('source', '?')}` |",
                 f"| Target PDFs | {rc.get('target_pdfs', '?')} |",
                 f"| Per Keyword | {rc.get('per_keyword', '?')} |",
@@ -991,8 +991,8 @@ class ResultExporter:
             lines += [
                 "## 🏁 Global Summary",
                 "",
-                f"| Metric | Value |",
-                f"|--------|-------|",
+                "| Metric | Value |",
+                "|--------|-------|",
                 f"| Total Unique PDFs Fetched | **{gs.get('total_unique_pdfs', '?')}** |",
                 f"| Unique Doc IDs | {gs.get('unique_arxiv_ids', '?')} |",
                 f"| Keywords Exhausted | {gs.get('keywords_exhausted', '?')} |",
@@ -1005,8 +1005,8 @@ class ResultExporter:
         lines += [
             "## 📊 Pipeline Summary",
             "",
-            f"| Metric | Value |",
-            f"|--------|-------|",
+            "| Metric | Value |",
+            "|--------|-------|",
             f"| Total Keyword Batches | {s.total_queries} |",
             f"| Total Documents Attempted | {s.total_documents} |",
             f"| Succeeded (total) | {s.total_succeeded} |",
@@ -1024,8 +1024,8 @@ class ResultExporter:
         lines += [
             "## 💾 Data Volume",
             "",
-            f"| Metric | Value |",
-            f"|--------|-------|",
+            "| Metric | Value |",
+            "|--------|-------|",
             f"| Total | **{s.total_mb} MB** ({s.total_bytes:,} bytes) |",
             f"| Average File Size | {s.avg_file_size_bytes:,.0f} bytes |",
             f"| Median File Size | {s.median_file_size_bytes:,.0f} bytes |",
@@ -1038,8 +1038,8 @@ class ResultExporter:
         lines += [
             "## ⏱️ Timing & Throughput",
             "",
-            f"| Metric | Value |",
-            f"|--------|-------|",
+            "| Metric | Value |",
+            "|--------|-------|",
             f"| Total Download Time | {s.total_download_time_s:.2f}s |",
             f"| Total Upload Time | {s.total_upload_time_s:.2f}s |",
             f"| Total Pipeline Time | {s.total_pipeline_time_s:.2f}s |",
@@ -1152,7 +1152,7 @@ def print_statistics(
             print(f"  ⚠  {global_summary.warning_message}")
 
     # ── Counts ────────────────────────────────────────────────────────
-    print(f"\n📊 Counts:")
+    print("\n📊 Counts:")
     print(f"  Total Queries     : {stats.total_queries}")
     print(f"  Total Docs        : {stats.total_documents}")
     print(f"  Succeeded         : {stats.total_succeeded}")
@@ -1164,7 +1164,7 @@ def print_statistics(
     print(f"  Success Rate      : {stats.success_rate}")
 
     # ── Data volume ───────────────────────────────────────────────────
-    print(f"\n💾 Data Volume:")
+    print("\n💾 Data Volume:")
     print(f"  Total             : {stats.total_mb} MB  ({stats.total_bytes:,} bytes)")
     print(f"  Average Size      : {stats.avg_file_size_bytes:,.0f} bytes")
     print(f"  Median Size       : {stats.median_file_size_bytes:,.0f} bytes")
@@ -1172,7 +1172,7 @@ def print_statistics(
     print(f"  Max Size          : {stats.max_file_size_bytes:,} bytes")
 
     # ── Timing ────────────────────────────────────────────────────────
-    print(f"\n⏱️  Timing:")
+    print("\n⏱️  Timing:")
     print(f"  Download Total    : {stats.total_download_time_s:.2f}s")
     print(f"  Upload Total      : {stats.total_upload_time_s:.2f}s")
     print(f"  Pipeline Total    : {stats.total_pipeline_time_s:.2f}s")
@@ -1182,17 +1182,17 @@ def print_statistics(
     print(f"  p95 Download      : {stats.p95_doc_download_time_s:.3f}s")
 
     # ── Throughput ────────────────────────────────────────────────────
-    print(f"\n🚀 Throughput:")
+    print("\n🚀 Throughput:")
     print(f"  Avg Download      : {stats.avg_download_throughput_mbps:.2f} MB/s")
     print(f"  Avg Upload        : {stats.avg_upload_throughput_mbps:.2f} MB/s")
 
     # ── Storage ───────────────────────────────────────────────────────
-    print(f"\n☁️  Storage Providers:")
+    print("\n☁️  Storage Providers:")
     for provider, count in stats.storage_providers.items():
         print(f"  {provider}: {count} documents")
 
     if verbose and stats.queries:
-        print(f"\n🔍 Query Breakdown (top 20 by succeeded):")
+        print("\n🔍 Query Breakdown (top 20 by succeeded):")
         for q in sorted(stats.queries, key=lambda x: x["succeeded"], reverse=True)[:20]:
             dup_note = f"  ({q['duplicate_documents']} dups)" if q["duplicate_documents"] else ""
             print(
