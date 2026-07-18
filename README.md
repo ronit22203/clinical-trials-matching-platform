@@ -6,7 +6,7 @@ No API keys. No cloud. Just `git clone` + `docker-compose up`.
 also a space heater that occasionally outputs a JSON file
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Made with Python](https://img.shields.io/badge/Python-3.11-blue)](https://python.org)
+[![Made with Python](https://img.shields.io/badge/Python-3.12-blue)](https://python.org)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)](https://docker.com)
 ![Compliance: HIPAA Aligned](https://img.shields.io/badge/Compliance-HIPAA--Aligned-green)
 ---
@@ -51,7 +51,7 @@ make reasoning-run-query QUERY="What biomarkers predict sepsis mortality?"
 | `data-acquisition` | Fetches PDFs from medRxiv, PubMed, ClinicalTrials |
 | `data-ingestion` | OCR (Surya) → PII redaction → chunking → Qdrant + Neo4j |
 | `agentic-reasoning` | Deterministic two-phase pipeline: GraphRAG retrieval → LLM synthesis (LM Studio / SGLang / Ollama) |
-| `platform-ui` | Next.js 14 dashboard for clinicians |
+| `palantir-blueprint` | React + Blueprint.js dashboard for clinicians (Vite, hot-reload) |
 
 ---
 
@@ -62,7 +62,7 @@ make reasoning-run-query QUERY="What biomarkers predict sepsis mortality?"
 | Neo4j Browser | <http://localhost:7474> | - |
 | Qdrant Dashboard | <http://localhost:6333/dashboard> | – |
 | Reasoning API | <http://localhost:8000> | – |
-| UI Dev Server | <http://localhost:3000> | – |
+| UI Dev Server | <http://localhost:5173> | – |
 
 ---
 
@@ -76,7 +76,7 @@ make fetch MAX_PDFS=5           # download PDFs
 make ingestion-run N=5          # run the ingestion pipeline directly
 make reasoning-run-query QUERY="..."  # one-shot reasoning query
 make reasoning-serve-api        # start the FastAPI backend
-make serve-ui                   # start the Next.js frontend
+make blueprint-dev              # start the Blueprint.js UI dev server (:5173)
 make help                       # list the full root control surface
 ```
 
@@ -94,7 +94,7 @@ Change any setting → rerun `make ingest` – deterministic rebuild.
 ## Prerequisites
 
 - [Docker Desktop](https://docker.com) (Compose v2)
-- Python 3.11+ + Node.js 18+
+- Python 3.12+ + Node.js 20+
 - LLM backend — pick one:
   - **[LM Studio](https://lmstudio.ai)** (default; local, no GPU required)
   - **[SGLang](https://github.com/sgl-project/sglang)** (production; recommended for GPU, e.g. RTX 5080)
@@ -115,7 +115,7 @@ agent:
 ## Troubleshooting (common)
 
 **Port conflict?**
-`lsof -i :7474` (Neo4j) / `:6333` (Qdrant) / `:8000` (API) / `:3000` (UI)
+`lsof -i :7474` (Neo4j) / `:6333` (Qdrant) / `:8000` (API) / `:5173` (UI)
 
 **Neo4j password mismatch?**
 `docker compose -f docker-compose.local.yml down -v && make up`
@@ -125,8 +125,8 @@ agent:
 - SGLang: `SGLANG_BASE_URL=http://localhost:30000/v1` (set in `.env.local`)
 - Ollama: `ollama serve` (in a separate terminal)
 
-**UI shows mock data?**
-Set `NEXT_PUBLIC_USE_MOCK=false` in `platform-ui/.env.local` and ensure API is running (`make serve-api`).
+**UI shows stale data?**
+Ensure the reasoning API (`:8000`) and ingestion API (`:8001`) are running, then hard-refresh the browser. Copy `palantir-blueprint/.env.local.example` → `.env.local` and check the `VITE_API_*` URLs match your setup.
 
 ---
 
