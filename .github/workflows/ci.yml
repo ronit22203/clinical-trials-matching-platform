@@ -51,7 +51,7 @@ jobs:
       - uses: actions/setup-python@v5
         if: matrix.changed == 'true'
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Install deps
         if: matrix.changed == 'true'
         working-directory: ${{ matrix.module }}
@@ -80,7 +80,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "20"
           cache: "npm"
           cache-dependency-path: palantir-blueprint/package-lock.json
       - run: npm ci --legacy-peer-deps
