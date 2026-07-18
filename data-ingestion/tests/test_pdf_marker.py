@@ -37,7 +37,7 @@ if __name__ == "__main__":
     try:
         extractor = PDFMarkerExtractor(output_dir=str(output_dir))
         result = extractor.extract(pdf_file)
-        print(f"✓ Extraction successful!")
+        print("✓ Extraction successful!")
         print(f"Content length: {len(result['content'])} characters")
         print(f"Metadata: {result['metadata']}")
     except Exception as e:

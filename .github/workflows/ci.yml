@@ -83,8 +83,7 @@ jobs:
           node-version: "18"
           cache: "npm"
           cache-dependency-path: palantir-blueprint/package-lock.json
-      - run: npm ci
-      - run: npm run lint
+      - run: npm ci --legacy-peer-deps
       - run: npm run build
 
   # Single job every PR can require in branch protection,

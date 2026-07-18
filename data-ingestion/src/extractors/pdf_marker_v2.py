@@ -3,7 +3,7 @@ import sys
 import argparse
 import json
 from pathlib import Path
-from PIL import Image, ImageDraw
+from PIL import ImageDraw
 import pypdfium2 as pdfium # Crucial for converting PDF pages to images
 
 # Add project root to path so imports work from any directory

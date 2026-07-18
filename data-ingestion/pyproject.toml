@@ -1,0 +1,7 @@
+[tool.ruff.lint.per-file-ignores]
+"scripts/*.py" = ["E402"]
+"tests/*.py" = ["E402"]
+"src/extractors/pdf_marker_v2.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

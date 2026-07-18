@@ -11,7 +11,6 @@ Phase 2 — Evidence-grounded synthesis:
 """
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass, field

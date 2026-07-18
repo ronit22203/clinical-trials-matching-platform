@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import sys
-import uuid
 from pathlib import Path
 from typing import AsyncIterator
 

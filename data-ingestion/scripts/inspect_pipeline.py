@@ -5,7 +5,6 @@ Verifies the pipeline works end-to-end and provides traceability inspection
 """
 
 import json
-import sys
 from pathlib import Path
 from datetime import datetime
 
@@ -54,7 +53,7 @@ def inspect_stage_1():
             
             # Sample first few lines from first page
             if data and data[0].get('text_lines'):
-                print(f"Sample (first 2 lines):")
+                print("Sample (first 2 lines):")
                 for line in data[0]['text_lines'][:2]:
                     text_preview = line['text'][:50].replace('\n', ' ')
                     conf = line.get('confidence', 0)
@@ -99,12 +98,12 @@ def inspect_stage_2():
                 content = f.read()
             
             lines = content.split('\n')
-            headers = [l for l in lines if l.startswith('#')]
+            headers = [ln for ln in lines if ln.startswith('#')]
             print(f"Lines: {len(lines)}")
             print(f"Headers found: {len(headers)}")
             
             if headers:
-                print(f"Sample headers:")
+                print("Sample headers:")
                 for header in headers[:3]:
                     print(f"• {header[:60]}")
             
@@ -198,14 +197,14 @@ def inspect_stage_4():
             print(f"Total chunks: {data.get('total_chunks', 'N/A')}")
             
             config = data.get('chunk_config', {})
-            print(f"Chunk config:")
+            print("Chunk config:")
             print(f"• max_tokens: {config.get('max_tokens')}")
             print(f"• overlap: {config.get('chunk_overlap')}")
             
             chunks = data.get('chunks', [])
             if chunks:
                 sample = chunks[0]
-                print(f"Sample chunk:")
+                print("Sample chunk:")
                 print(f"• Context: {sample.get('context', 'N/A')[:60]}")
                 print(f"• Level: {sample.get('level')}")
                 content_preview = sample.get('content', '')[:80].replace('\n', ' ')
@@ -227,19 +226,19 @@ def check_qdrant():
         collections = client.get_collections()
         
         col_names = [c.name for c in collections.collections]
-        print(f"✓ Connected to Qdrant")
+        print("✓ Connected to Qdrant")
         print(f"  Collections: {col_names if col_names else 'None'}")
         
         if 'medical_papers' in col_names:
             stats = client.get_collection('medical_papers')
-            print(f"\n  medical_papers collection:")
+            print("\n  medical_papers collection:")
             print(f"    • Points: {stats.points_count}")
             print(f"    • Vector size: {stats.config.params.vectors.size}")
             print(f"    • Status: {stats.status}")
     
     except Exception as e:
         print(f"Qdrant not available: {e}")
-        print(f"Run: make docker-up")
+        print("Run: make docker-up")
 
 def print_summary():
     """Print pipeline summary"""
@@ -271,13 +270,13 @@ def print_summary():
         client = QdrantClient("http://localhost:6333")
         collections = client.get_collections()
         if any(c.name == 'medical_papers' for c in collections.collections):
-            print(f"  Stage 5    Qdrant Vector DB                ✓ Indexed")
+            print("  Stage 5    Qdrant Vector DB                ✓ Indexed")
         else:
-            print(f"  Stage 5    Qdrant Vector DB                Not indexed")
-    except:
-        print(f"  Stage 5    Qdrant Vector DB                Offline")
+            print("  Stage 5    Qdrant Vector DB                Not indexed")
+    except Exception:
+        print("  Stage 5    Qdrant Vector DB                Offline")
     
-    print(f"\nFull documentation: docs/data_flow.md")
+    print("\nFull documentation: docs/data_flow.md")
 
 def main():
     print("\n" + ""*20)

@@ -232,7 +232,7 @@ if __name__ == "__main__":
             with retriever.driver.session() as session:
                 result = session.run("RETURN 'Neo4j Connected' as status")
                 neo4j_status = list(result)[0]['status']
-                print(f"✓ Neo4j: Connected")
+                print("✓ Neo4j: Connected")
         except Exception as e:
             print(f"⚠ Neo4j connection issue: {e}")
             neo4j_status = "UNAVAILABLE"
@@ -288,7 +288,7 @@ if __name__ == "__main__":
             print(f"{'─'*70}")
             
             # Qdrant Details
-            print(f"\nQDRANT VECTOR STORE:")
+            print("\nQDRANT VECTOR STORE:")
             print(f"   Point ID: {result['id']}")
             print(f"   Source: {result['source']}")
             if result['chunk_id']:
@@ -307,13 +307,13 @@ if __name__ == "__main__":
             print(f"   Content: {content_preview}{'...' if len(str(content)) > 150 else ''}")
             
             # Neo4j Graph Details
-            print(f"\nNEO4J KNOWLEDGE GRAPH:")
+            print("\nNEO4J KNOWLEDGE GRAPH:")
             if result['graph_facts']:
                 print(f"   Found {len(result['graph_facts'])} related facts:")
                 for j, fact in enumerate(result['graph_facts'], 1):
                     print(f"      {j}. {fact}")
             else:
-                print(f"   No related graph facts found")
+                print("   No related graph facts found")
             
             # Raw payload info
             if result['payload']:

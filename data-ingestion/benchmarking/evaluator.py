@@ -1,5 +1,4 @@
 import json
-import sys
 from pathlib import Path
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
@@ -114,7 +113,7 @@ ndcg_at_5 = calculate_ndcg(relevance_scores)
 
 # Print comprehensive metrics
 print(f"Successful Hits: {successful_hits}/{total_queries}")
-print(f"\nMETRICS:")
+print("\nMETRICS:")
 print(f"  RECALL@5:        {recall_at_5:.2f}%")
 print(f"  Precision@5:     {mean_precision_at_5:.2f}%")
 print(f"  MRR@5:           {mean_reciprocal_rank:.2f}%")

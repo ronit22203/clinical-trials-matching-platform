@@ -1,6 +1,5 @@
-import os
 import uuid
-from typing import List, Dict, Any
+from typing import Dict, Any
 from pathlib import Path
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
