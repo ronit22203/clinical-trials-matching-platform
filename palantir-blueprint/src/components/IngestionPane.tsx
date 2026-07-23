@@ -58,10 +58,10 @@ const INITIAL_STEPS: PipelineStep[] = [
 // Word-level OCR bounding boxes
 // Heatmap grid — 6 columns × 9 rows of simulated confidence values
 const ENTITY_COLORS: Record<ChunkEntity["type"], { bg: string; text: string }> = {
-  medication:  { bg: "rgba(181,137,0,0.12)",   text: "#8a6800" },
-  condition:   { bg: "rgba(203,75,22,0.12)",   text: "#b53a10" },
-  measurement: { bg: "rgba(42,161,152,0.12)",  text: "#1d8a83" },
-  protocol:    { bg: "rgba(38,139,210,0.12)",  text: "#1a6fa8" },
+  medication:  { bg: "var(--status-warning-bg)", text: "var(--status-warning)" },
+  condition:   { bg: "var(--status-critical-bg)", text: "var(--status-critical)" },
+  measurement: { bg: "var(--status-nominal-bg)", text: "var(--status-nominal)" },
+  protocol:    { bg: "var(--status-info-bg)", text: "var(--status-info)" },
 };
 
 // ─── Sub-components ───────────────────────────────────────────
@@ -236,8 +236,8 @@ function MarkdownDiff({ rawOcrText, cleanedMarkdown }: { rawOcrText: string; cle
                 key={i}
                 style={{
                   display: "block",
-                  background: isAdded ? "rgba(42, 161, 152, 0.10)" : undefined,
-                  borderLeft: isAdded ? "2px solid #2aa198" : "2px solid transparent",
+                  background: isAdded ? "var(--status-nominal-bg)" : undefined,
+                  borderLeft: isAdded ? "2px solid var(--status-nominal)" : "2px solid transparent",
                   paddingLeft: isAdded ? 4 : 6,
                 }}
               >
@@ -284,7 +284,7 @@ function PdfPreview({ file, onStart, clinicianMode }: { file: File; onStart: () 
           {(file.size / 1024).toFixed(0)} KB{pageCount != null ? ` · ${pageCount} page${pageCount !== 1 ? "s" : ""}` : ""}
         </div>
       </div>
-      <Button intent={Intent.PRIMARY} icon={clinicianMode ? "upload" : "play"} onClick={onStart}>
+      <Button className="primary-action" intent={Intent.PRIMARY} icon={clinicianMode ? "upload" : "play"} onClick={onStart}>
         {clinicianMode ? "Upload & Process" : "Start Ingestion"}
       </Button>
     </div>
@@ -614,10 +614,10 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
           <Tag minimal style={{ fontFamily: "var(--text-mono)", fontSize: 9 }}>job: {jobId.slice(0, 8)}</Tag>
         )}
         <Button
+          className={!running && selectedFile ? "primary-action" : undefined}
           icon={running ? "stop" : (clinicianMode ? "upload" : "play")}
           intent={running ? Intent.DANGER : (selectedFile ? Intent.PRIMARY : Intent.NONE)}
           small
-          minimal={clinicianMode}
           disabled={!running && !selectedFile}
           text={running ? "Cancel" : done ? (clinicianMode ? "Upload again" : "Re-run") : (clinicianMode ? "Upload & Process" : "Start Ingestion")}
           onClick={running ? resetPipeline : startIngestion}
@@ -690,7 +690,7 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
             </div>
           ) : (
             /* Engineer view: full progress bars */
-            <Card elevation={Elevation.TWO} style={{ padding: "12px 14px" }}>
+            <Card elevation={Elevation.ONE} style={{ padding: "12px 14px" }}>
               <H5 style={{ marginBottom: 12, fontFamily: "var(--text-mono)", fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase" }}>
                 Pipeline Steps
               </H5>
@@ -711,7 +711,7 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
                       stripes={step.status === "active"}
                     />
                     {step.status === "failed" && step.errorMsg && (
-                      <div style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "#C97B6E", marginTop: 3 }}>
+                      <div style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--status-critical)", marginTop: 3 }}>
                         {step.errorMsg}
                       </div>
                     )}
@@ -766,10 +766,10 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
                 {!clinicianMode && (
                   <div style={{ display: "flex", gap: 8 }}>
                     {[
-                      ["medication", "#c49a3c"],
-                      ["condition", "#C97B6E"],
-                      ["measurement", "#A3B899"],
-                      ["protocol", "#6a9bc0"],
+                      ["medication", "var(--status-warning)"],
+                      ["condition", "var(--status-critical)"],
+                      ["measurement", "var(--status-nominal)"],
+                      ["protocol", "var(--status-info)"],
                     ].map(([type, color]) => (
                       <span key={type} style={{ fontFamily: "var(--text-mono)", fontSize: 9, color }}>■ {type}</span>
                     ))}

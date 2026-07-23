@@ -10,9 +10,17 @@ import IngestionPane from "./components/IngestionPane";
 const PANE_MIN = 160;
 const PANE_MAX = 520;
 const PANE_DEFAULT = 290;
+const THEME_STORAGE_KEY = "clinical-search-theme";
+
+type ThemeMode = "solarized" | "slate";
+
+function getInitialTheme(): ThemeMode {
+  return window.localStorage.getItem(THEME_STORAGE_KEY) === "slate" ? "slate" : "solarized";
+}
 
 export default function App() {
   const [clinicianMode, setClinicalMode] = useState(true);
+  const [theme, setTheme]               = useState<ThemeMode>(getInitialTheme);
   const [paneWidth, setPaneWidth]       = useState(PANE_DEFAULT);
   const [collapsed, setCollapsed]       = useState(false);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -47,6 +55,11 @@ export default function App() {
     };
   }, [dragging]);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
   function handleQueryComplete(query: string, hitCount: number) {
     setHistory((prev) => [
       ...prev,
@@ -71,7 +84,12 @@ export default function App() {
         cursor: dragging ? "col-resize" : undefined,
       }}
     >
-      <Navigation clinicianMode={clinicianMode} onModeToggle={() => setClinicalMode((v) => !v)} />
+      <Navigation
+        clinicianMode={clinicianMode}
+        theme={theme}
+        onModeToggle={() => setClinicalMode((v) => !v)}
+        onThemeToggle={() => setTheme((current) => current === "solarized" ? "slate" : "solarized")}
+      />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
 
         {/* LeftPane with animated width */}
@@ -122,7 +140,7 @@ export default function App() {
               width: 18,
               height: 36,
               borderRadius: 9,
-              border: "1px solid var(--border)",
+              border: "1px solid var(--control-border)",
               background: "var(--surface-2)",
               color: "var(--text-dim)",
               cursor: "pointer",
@@ -141,7 +159,7 @@ export default function App() {
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLButtonElement).style.background = "var(--surface-2)";
               (e.currentTarget as HTMLButtonElement).style.color = "var(--text-dim)";
-              (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)";
+              (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--control-border)";
             }}
             title={leftCollapsed ? "Expand panel" : "Collapse panel"}
           >
@@ -165,7 +183,7 @@ export default function App() {
             alignItems: "center",
             justifyContent: "center",
             cursor: collapsed ? "default" : "col-resize",
-            background: dragging ? "rgba(126,200,164,0.08)" : "transparent",
+            background: dragging ? "var(--accent-primary-dim)" : "transparent",
             transition: "background 0.15s",
             zIndex: 10,
           }}
@@ -192,7 +210,7 @@ export default function App() {
               width: 18,
               height: 36,
               borderRadius: 9,
-              border: "1px solid var(--border)",
+              border: "1px solid var(--control-border)",
               background: "var(--surface-2)",
               color: "var(--text-dim)",
               cursor: "pointer",
@@ -202,7 +220,6 @@ export default function App() {
               padding: 0,
               fontSize: 10,
               transition: "all 0.15s ease",
-              backdropFilter: "blur(8px)",
             }}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLButtonElement).style.background = "var(--surface-3)";
@@ -212,7 +229,7 @@ export default function App() {
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLButtonElement).style.background = "var(--surface-2)";
               (e.currentTarget as HTMLButtonElement).style.color = "var(--text-dim)";
-              (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--border)";
+              (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--control-border)";
             }}
             title={collapsed ? "Expand panel" : "Collapse panel"}
           >

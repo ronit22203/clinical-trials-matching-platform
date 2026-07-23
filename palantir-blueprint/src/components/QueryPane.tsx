@@ -53,9 +53,9 @@ function enrollmentIntent(status: string): Intent {
 }
 
 function confHighlightStyle(conf: number): React.CSSProperties {
-  if (conf >= 0.9) return { background: "rgba(42,161,152,0.14)", borderBottom: "1px solid rgba(42,161,152,0.5)", paddingBottom: 1 };
-  if (conf >= 0.8) return { background: "rgba(181,137,0,0.13)", borderBottom: "1px solid rgba(181,137,0,0.45)", paddingBottom: 1 };
-  return { background: "rgba(203,75,22,0.10)", borderBottom: "1px solid rgba(203,75,22,0.40)", paddingBottom: 1 };
+  if (conf >= 0.9) return { background: "var(--status-nominal-bg)", borderBottom: "1px solid var(--status-nominal)", paddingBottom: 1 };
+  if (conf >= 0.8) return { background: "var(--status-warning-bg)", borderBottom: "1px solid var(--status-warning)", paddingBottom: 1 };
+  return { background: "var(--status-critical-bg)", borderBottom: "1px solid var(--status-critical)", paddingBottom: 1 };
 }
 
 // ─── Sub-components ───────────────────────────────────────────
@@ -122,7 +122,7 @@ function SkeletonCard() {
 
 function ProvenanceChunk({ prov, clinicianMode }: { prov: ProvenanceSource; clinicianMode: boolean }) {
   const [showPdf, setShowPdf] = useState(false);
-  const borderColor = prov.conf >= 0.9 ? "rgba(106,158,196,0.6)" : prov.conf >= 0.8 ? "rgba(196,130,90,0.55)" : "rgba(201,123,110,0.5)";
+  const borderColor = prov.conf >= 0.9 ? "var(--status-info)" : prov.conf >= 0.8 ? "var(--status-warning)" : "var(--status-critical)";
   const metaFields = clinicianMode
     ? ([["SOURCE", prov.source], ["PAGE", prov.page]] as [string, string][])
     : ([["SOURCE", prov.source], ["BYTES", prov.byteRange], ["PAGE", prov.page], ["CONF", prov.conf.toFixed(2)]] as [string, string][]);
@@ -190,7 +190,7 @@ function ResultCard({
       elevation={expanded ? Elevation.TWO : Elevation.ONE}
       style={{
         padding: "10px 14px",
-        outline: highlighted ? "1px solid rgba(42,161,152,0.55)" : "none",
+        outline: highlighted ? "2px solid var(--focus-ring)" : "none",
         transition: "outline 0.15s",
       }}
     >
@@ -578,7 +578,8 @@ export default function QueryPane({
         }}
       >
         <InputGroup
-          placeholder="Search… (press / to focus)"
+          aria-label="Search the clinical knowledge base. Press slash to focus."
+          placeholder="Search the clinical knowledge base"
           leftIcon="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -589,7 +590,9 @@ export default function QueryPane({
           rightElement={
             query ? (
               <Button minimal icon="cross" onClick={() => { setQuery(""); resetQuery(); }} />
-            ) : undefined
+            ) : (
+              <kbd className="search-shortcut" aria-hidden="true">/</kbd>
+            )
           }
         />
         {/* Filter — floats as Popover, no layout shift */}
@@ -643,7 +646,8 @@ export default function QueryPane({
           />
         </Popover>
         <Button
-          intent={Intent.SUCCESS}
+          className="primary-action"
+          intent={Intent.PRIMARY}
           text="RUN"
           loading={queryState === "loading"}
           onClick={runQuery}
@@ -739,10 +743,10 @@ export default function QueryPane({
             </div>
           </div>
 
-          {/* Entity Graph half */}
+          {/* Knowledge Graph half */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <div style={{ padding: "4px 12px 3px", borderBottom: "1px solid var(--border-dim)", background: "var(--surface-1)", flexShrink: 0 }}>
-              <span className="section-label" style={{ margin: 0 }}>ENTITY RELATIONSHIP </span>
+                <span className="section-label" style={{ margin: 0 }}>KNOWLEDGE GRAPH</span>
             </div>
             <div style={{ flex: 1, overflow: "hidden" }}>
               <GraphPanel />
@@ -752,24 +756,17 @@ export default function QueryPane({
         </div>
       </div>
 
-      {/* Status bar — lean */}
-      <div
-        style={{
-          borderTop: "1px solid var(--border)",
-          padding: "4px 14px",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          flexWrap: "wrap",
-        }}
-      >
-        {clinicianMode ? (
-          <span className="status-chip">
-            <span style={{ color: "var(--status-nominal)" }}>●</span>
-            System online
-          </span>
-        ) : (
-          <>
+      {!clinicianMode && (
+        <div
+          style={{
+            borderTop: "1px solid var(--border)",
+            padding: "4px 14px",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flexWrap: "wrap",
+          }}
+        >
             {([
               ["HITS", queryState === "results" ? String(liveMeta?.totalHits ?? results.length) : "—"],
               ["LATENCY", queryState === "results" && liveMeta ? `${liveMeta.latencyMs}ms` : "—"],
@@ -781,12 +778,8 @@ export default function QueryPane({
                 <strong style={{ fontWeight: 500, color: "var(--text-primary)" }}>{val}</strong>
               </span>
             ))}
-            <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--status-nominal)", marginLeft: 4 }}>
-              ● online
-            </span>
-          </>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

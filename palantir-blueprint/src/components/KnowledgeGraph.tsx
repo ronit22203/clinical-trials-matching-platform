@@ -20,12 +20,12 @@ interface GraphEdge {
 }
 
 const NODE_COLORS: Record<NodeType, { fill: string; stroke: string; text: string }> = {
-  patient:    { fill: "rgba(38,139,210,0.12)",  stroke: "#268bd2", text: "#1a6fa8" },
-  condition:  { fill: "rgba(203,75,22,0.12)",   stroke: "#cb4b16", text: "#a33a10" },
-  medication: { fill: "rgba(181,137,0,0.12)",   stroke: "#b58900", text: "#8a6800" },
-  lab:        { fill: "rgba(42,161,152,0.12)",  stroke: "#2aa198", text: "#1d8a83" },
-  trial:      { fill: "rgba(108,113,196,0.12)", stroke: "#6c71c4", text: "#5056a8" },
-  relation:   { fill: "rgba(88,110,117,0.08)",  stroke: "#657b83", text: "#657b83" },
+  patient:    { fill: "var(--graph-patient-fill)", stroke: "var(--graph-patient-stroke)", text: "var(--graph-patient-text)" },
+  condition:  { fill: "var(--graph-condition-fill)", stroke: "var(--graph-condition-stroke)", text: "var(--graph-condition-text)" },
+  medication: { fill: "var(--graph-medication-fill)", stroke: "var(--graph-medication-stroke)", text: "var(--graph-medication-text)" },
+  lab:        { fill: "var(--graph-lab-fill)", stroke: "var(--graph-lab-stroke)", text: "var(--graph-lab-text)" },
+  trial:      { fill: "var(--graph-trial-fill)", stroke: "var(--graph-trial-stroke)", text: "var(--graph-trial-text)" },
+  relation:   { fill: "var(--graph-relation-fill)", stroke: "var(--graph-relation-stroke)", text: "var(--graph-relation-text)" },
 };
 
 interface KnowledgeGraphProps {
@@ -150,7 +150,7 @@ export default function KnowledgeGraph({ onTrialClick, highlightedNct, nodes: pr
     return (
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <span className="section-label">ENTITY GRAPH — 0 nodes · 0 edges</span>
+          <span className="section-label">0 nodes · 0 edges</span>
         </div>
         <div style={{
           height: 435,
@@ -173,7 +173,7 @@ export default function KnowledgeGraph({ onTrialClick, highlightedNct, nodes: pr
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
         <span className="section-label">
-          ENTITY GRAPH — {renderedNodes.length} nodes · {liveEdges.length} edges
+          {renderedNodes.length} nodes · {liveEdges.length} edges
         </span>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {selectedNode && (
@@ -219,7 +219,7 @@ export default function KnowledgeGraph({ onTrialClick, highlightedNct, nodes: pr
                 <line
                   x1={f.x} y1={f.y}
                   x2={t.x} y2={t.y}
-                  stroke={edgeActive || isHoveredEdge ? "#268bd2" : "rgba(88,110,117,0.25)"}
+                  stroke={edgeActive || isHoveredEdge ? "var(--status-info)" : "var(--graph-edge)"}
                   strokeWidth={edgeActive || isHoveredEdge ? 1.5 : 1}
                 />
                 {/* Invisible wider hit area for edge hover */}
@@ -237,7 +237,7 @@ export default function KnowledgeGraph({ onTrialClick, highlightedNct, nodes: pr
                     x={mx} y={my - 4}
                     textAnchor="middle"
                     fontSize={8}
-                    fill={edgeActive || isHoveredEdge ? "#268bd2" : "rgba(88,110,117,0.35)"}
+                    fill={edgeActive || isHoveredEdge ? "var(--status-info)" : "var(--graph-edge)"}
                     fontFamily="monospace"
                     opacity={isHoveredEdge || (edgeActive ? 1 : 0) ? 1 : 0}
                     style={{
@@ -273,7 +273,7 @@ export default function KnowledgeGraph({ onTrialClick, highlightedNct, nodes: pr
                   cx={node.x} cy={node.y}
                   r={isSel ? 12 : isHighTrial ? 10 : 8}
                   fill={c.fill}
-                  stroke={isSel || isHov || isHighTrial ? c.stroke : "rgba(88,110,117,0.2)"}
+                  stroke={isSel || isHov || isHighTrial ? c.stroke : "var(--graph-node-border)"}
                   strokeWidth={isSel || isHighTrial ? 2 : 1}
                 />
                 {node.sublabel && (
@@ -314,9 +314,10 @@ export default function KnowledgeGraph({ onTrialClick, highlightedNct, nodes: pr
             flexDirection: "column",
             gap: 3,
             padding: "4px 7px",
-            background: "rgba(253,246,227,0.92)",
+            background: "var(--surface-1)",
             borderRadius: 6,
             border: "1px solid var(--border)",
+            boxShadow: "var(--shadow-xs)",
             pointerEvents: "none",
           }}
         >
