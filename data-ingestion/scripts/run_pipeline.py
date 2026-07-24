@@ -179,6 +179,7 @@ class MedicalDataPipeline:
         successful = 0
         failed = 0
         failed_files = []
+        current_run_chunks: list[Path] = []
         
         # Load models once for all PDFs (significant time savings)
         if not skip_ocr:
@@ -281,6 +282,7 @@ class MedicalDataPipeline:
                     self.tracker.record_stage(exec_uuid, "chunk",
                                               chunks_json_path.read_text(encoding="utf-8"),
                                               artifact_ext="json")
+                    current_run_chunks.append(chunks_json_path)
                 else:
                     self.logger.info("  Stage 4/5: Skipped (--skip-chunk)")
                 
@@ -297,11 +299,11 @@ class MedicalDataPipeline:
                 self.tracker.complete_execution(exec_uuid, status=exec_status)
         
         # Stage 5: Vectorization (once for all files)
-        if not skip_vectorize and (successful > 0 or not skip_clean):
+        if not skip_vectorize and current_run_chunks:
             self.logger.info("")
             self.logger.info("Stage 5/5: Vectorization (Embed & Index)")
             try:
-                self._stage5_vectorize()
+                self._stage5_vectorize(current_run_chunks)
                 self.logger.info("✓ Vectorization complete")
             except Exception as e:
                 self.logger.error(f"✗ Vectorization failed: {e}")
@@ -310,6 +312,8 @@ class MedicalDataPipeline:
         elif skip_vectorize:
             self.logger.info("")
             self.logger.info("Stage 5/6: Skipped (--skip-vectorize)")
+        else:
+            self.logger.info("Stage 5/5: Skipped (no current-run chunks artifacts)")
         
         # Stage 6: Knowledge Graph (entity extraction → Neo4j)
         kg_cfg = self.config.get("knowledge_graph", {})
@@ -520,19 +524,34 @@ class MedicalDataPipeline:
         except Exception as e:
             raise RuntimeError(f"Stage 4 (Chunking) failed: {str(e)}")
     
-    def _stage5_vectorize(self):
-        """Stage 5: Vectorize all cleaned documents"""
+    def _stage5_vectorize(self, chunks_paths: list[Path]) -> int:
+        """Stage 5: Index only this batch run's persisted Stage 4 artifacts."""
+        vec_config = self.config.get("vectorization", {})
+        collection_name = vec_config.get("collection_name")
+        if not isinstance(collection_name, str) or not collection_name.strip():
+            raise ValueError("vectorization.collection_name must be configured")
+
         self.logger.info("  • Initializing vectorizer...")
         vectorizer = MedicalVectorizer(config=self.config)
         
         self.logger.info(f"  • Model: {self.config.get('vectorization', {}).get('model_name', 'BAAI/bge-small-en-v1.5')}")
         self.logger.info(f"  • Embedding dimension: {vectorizer.embedding_dim}")
         self.logger.info(f"  • Qdrant URL: {self.config.get('vectorization', {}).get('qdrant_url', 'http://localhost:6333')}")
-        self.logger.info(f"  • Collection: {vectorizer.collection_name}")
-        
-        self.logger.info(f"  • Processing: {self.cleaned_dir}")
-        vectorizer.run(str(self.cleaned_dir))
-        self.logger.info("  ✓ Vectorization complete")
+        self.logger.info(f"  • Collection: {collection_name}")
+
+        indexed_chunks = 0
+        for chunks_path in chunks_paths:
+            indexed_chunks += vectorizer.index_chunks_path(
+                chunks_path,
+                scope="literature",
+                collection_name=collection_name,
+            )
+        self.logger.info(
+            "  ✓ Vectorization complete: %s chunks across %s current-run artifacts",
+            indexed_chunks,
+            len(chunks_paths),
+        )
+        return indexed_chunks
 
 
     def _stage6_knowledge_graph(self):

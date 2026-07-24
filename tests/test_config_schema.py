@@ -64,7 +64,16 @@ class TestIngestionConfig:
         vec = self._ing["vectorization"]
         assert "model_name" in vec
         assert "collection_name" in vec
+        assert "patient_context_collection" in vec
+        assert vec["patient_context_collection"] != vec["collection_name"]
         assert vec["embedding_dim"] > 0
+
+    def test_knowledge_graph_has_explicit_fallback(self):
+        kg = self._ing["knowledge_graph"]
+        assert kg["chat_url"]
+        assert kg["fallback_chat_url"]
+        assert kg["fallback_model"]
+        assert kg["health_timeout_seconds"] > 0
 
     def test_ocr_confidence_threshold_in_range(self):
         threshold = self._ing["ocr"].get("confidence_threshold", 0.8)
@@ -114,20 +123,24 @@ class TestAgenticReasoningConfig:
     def reasoning(self):
         self._ar = _cfg["agentic_reasoning"]
 
-    def test_agents_section_non_empty(self):
-        assert "agents" in self._ar
-        assert len(self._ar["agents"]) > 0, "At least one agent definition required"
+    @property
+    def _agent_configs(self):
+        if "agent" in self._ar:
+            return {"default": self._ar["agent"]}
+        return self._ar.get("agents", {})
+
+    def test_agent_configuration_non_empty(self):
+        assert self._agent_configs, "At least one agent definition is required"
 
     def test_default_agent_references_existing_agent(self):
         default = self._ar.get("defaults", {}).get("default_agent")
         if default:
-            assert default in self._ar["agents"], (
+            assert default in self._agent_configs, (
                 f"default_agent={default!r} is not defined in agents section"
             )
 
-    def test_each_agent_has_name_model_system_prompt(self):
-        for agent_key, agent_cfg in self._ar["agents"].items():
-            assert "name" in agent_cfg, f"agent {agent_key!r} missing 'name'"
+    def test_each_agent_has_model_and_system_prompt(self):
+        for agent_key, agent_cfg in self._agent_configs.items():
             assert "model" in agent_cfg, f"agent {agent_key!r} missing 'model'"
             assert "system_prompt" in agent_cfg, f"agent {agent_key!r} missing 'system_prompt'"
 
@@ -139,9 +152,17 @@ class TestAgenticReasoningConfig:
 
     def test_model_params_temperature_in_range(self):
         """All configured model_params must have a temperature in [0.0, 2.0]."""
-        for agent_key, agent_cfg in self._ar["agents"].items():
+        for agent_key, agent_cfg in self._agent_configs.items():
             params = agent_cfg.get("model_params", {})
             if "temperature" in params:
                 assert 0.0 <= params["temperature"] <= 2.0, (
                     f"agent {agent_key!r}: temperature out of range"
                 )
+
+    def test_reasoning_agent_has_explicit_fallback_and_retrieval_guardrails(self):
+        agent = self._ar["agent"]
+        graphrag = self._ar["graphrag"]["config"]
+        assert agent["fallback_model"].startswith("lmstudio/")
+        assert agent["health_check_timeout_seconds"] > 0
+        assert graphrag["scope"] == "literature"
+        assert -1.0 <= graphrag["min_relevance_score"] <= 1.0

@@ -50,8 +50,21 @@ class KnowledgeGraphBuilder:
         self._config = config
         self._creator = GraphCreator(config)
 
-    def run(self, chunks_dir: Path) -> None:
-        self._creator.process_chunks_dir(Path(chunks_dir))
+    def run(
+        self, chunks_dir: Path, scope: str = "literature", force: bool = False
+    ) -> int:
+        """Build graph relationships for a directory and return the write count."""
+        return self._creator.process_chunks_dir(
+            Path(chunks_dir), scope=scope, force=force
+        )
+
+    def process_chunks_file(
+        self, chunks_file: Path, scope: str = "literature", force: bool = False
+    ) -> int:
+        """Build graph relationships for one chunk artifact."""
+        return self._creator.process_chunks_file(
+            Path(chunks_file), scope=scope, force=force
+        )
 
     def close(self) -> None:
         self._creator.close()
@@ -63,6 +76,12 @@ def main() -> None:
     )
     parser.add_argument("-c", "--config", help="Path to config YAML")
     parser.add_argument("--chunks-dir", help="Override chunks directory path")
+    parser.add_argument(
+        "--scope", default="literature", help="Provenance scope for written relationships"
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Purge and rebuild each source scope"
+    )
     args = parser.parse_args()
 
     cfg = _load_config(args.config)
@@ -77,7 +96,10 @@ def main() -> None:
 
     creator = GraphCreator(cfg)
     try:
-        creator.process_chunks_dir(chunks_dir)
+        total_triplets = creator.process_chunks_dir(
+            chunks_dir, scope=args.scope, force=args.force
+        )
+        logger.info("Wrote %d source-scoped relationship(s)", total_triplets)
     finally:
         creator.close()
         logger.info("Done — check http://localhost:7474")

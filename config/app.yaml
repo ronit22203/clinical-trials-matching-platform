@@ -70,6 +70,7 @@ data_ingestion:
     distance_metric: cosine
     qdrant_url: ${QDRANT_URL}
     collection_name: medical_papers
+    patient_context_collection: patient_context
     batch_size: 64
   neo4j:
     uri: ${NEO4J_URI}
@@ -78,8 +79,11 @@ data_ingestion:
     database: neo4j
   knowledge_graph:
     enabled: true
-    model: qwen3-8b
-    chat_url: ${LM_STUDIO_BASE_URL}/chat/completions
+    model: Qwen/Qwen2.5-7B-Instruct
+    chat_url: ${SGLANG_BASE_URL}/chat/completions
+    fallback_model: ${LLM_MODEL}
+    fallback_chat_url: ${LM_STUDIO_BASE_URL}/chat/completions
+    health_timeout_seconds: 2
     max_retries: 2
     timeout_seconds: 180
     max_tokens: 1024
@@ -811,6 +815,8 @@ data_acquisition:
 agentic_reasoning:
   agent:
     model: sglang/Qwen/Qwen2.5-7B-Instruct
+    fallback_model: lmstudio/${LLM_MODEL}
+    health_check_timeout_seconds: 2
     system_prompt: >-
       You are a clinical research assistant with access to an internal knowledge base.
       You operate in a two-phase pipeline: evidence is always retrieved before you respond.
@@ -837,6 +843,8 @@ agentic_reasoning:
       neo4j_password: ${NEO4J_PASSWORD}
       embedding_model: BAAI/bge-small-en-v1.5
       model_cache_dir: data/models
+      scope: literature
+      min_relevance_score: 0.35
       limit: 3
       neo4j_limit: 10
       reranker_model: BAAI/bge-reranker-base

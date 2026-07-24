@@ -28,6 +28,7 @@ export interface BackendMatchEvidence {
 export interface BackendMatch {
   chunkIndex: number;
   score: number;
+  rankScore?: number | null;
   source: string;
   content: string;
   context: string;
@@ -40,6 +41,7 @@ export interface BackendMatchResponse {
   found: boolean;
   matches: BackendMatch[];
   graphFacts: string[];
+  graphAnchor?: string | null;
   latency_ms: number;
 }
 
@@ -93,17 +95,54 @@ export interface BackendArtifactPreviewResponse {
 
 export interface BackendSynthesisResponse {
   synthesis: string;
-  model: string;
+  model: string | null;
+  fallbackUsed: boolean;
   tokensUsed: number | null;
 }
 
+export interface ApiErrorDetail {
+  code: string | null;
+  message: string;
+  retryable: boolean;
+}
 
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly retryable: boolean;
+
+  constructor(status: number, detail: ApiErrorDetail) {
+    super(detail.message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = detail.code;
+    this.retryable = detail.retryable;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseErrorDetail(payload: unknown, status: number): ApiErrorDetail {
+  const detail = isRecord(payload) && isRecord(payload.detail) ? payload.detail : null;
+  const code = typeof detail?.code === "string" ? detail.code : null;
+  return {
+    code,
+    message: code === "synthesis_unavailable"
+      ? "Synthesis is temporarily unavailable. Retrieved evidence remains available."
+      : typeof detail?.message === "string"
+      ? detail.message
+      : `Request failed (${status}). Please try again.`,
+    retryable: detail?.retryable === true,
+  };
+}
 
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const res = await fetch(input, init);
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status} ${res.statusText}${body ? `: ${body}` : ""}`);
+    const payload: unknown = await res.json().catch(() => null);
+    throw new ApiError(res.status, parseErrorDetail(payload, res.status));
   }
   return res.json() as Promise<T>;
 }

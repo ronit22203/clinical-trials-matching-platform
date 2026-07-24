@@ -23,7 +23,8 @@ export default function App() {
   const [theme, setTheme]               = useState<ThemeMode>(getInitialTheme);
   const [paneWidth, setPaneWidth]       = useState(PANE_DEFAULT);
   const [collapsed, setCollapsed]       = useState(false);
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  // Start with the empty patient-context panel out of the way.
+  const [leftCollapsed, setLeftCollapsed] = useState(true);
   const [dragging, setDragging]         = useState(false);
   // Session history + patient context
   const [history, setHistory]           = useState<QueryHistoryItem[]>([]);

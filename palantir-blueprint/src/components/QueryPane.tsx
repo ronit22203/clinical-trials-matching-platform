@@ -307,13 +307,17 @@ export default function QueryPane({
     errorMsg: liveErrorMsg,
     synthesis,
     synthesisLoading,
+    synthesisError,
+    synthesisModel,
+    synthesisFallbackUsed,
     runQuery: apiRunQuery,
+    retrySynthesis,
     resetQuery,
   } = useQueryPoll();
 
   function runQuery() {
     const q = query.trim();
-    if (!q) return;
+    if (q.length < 3) return;
     lastRanQuery.current = q;
     setExpanded(null);
     setDisplayCount(3);
@@ -416,6 +420,8 @@ export default function QueryPane({
   const hasMore = displayCount < results.length;
   const anyFilterActive = Object.values(activeFilters).some((a) => a.length > 0);
   const selectedForProvenance = results.find((r) => r.id === expandedResult) ?? results[0];
+  const canRunQuery = query.trim().length >= 3;
+  const hasExecutedQuery = queryState !== "idle";
 
   // ── Panels ────────────────────────────────────────────────
 
@@ -423,6 +429,7 @@ export default function QueryPane({
     if (queryState === "idle") {
       return (
         <NonIdealState
+          className="query-empty-state"
           icon="search"
           title="Enter a query"
           description={
@@ -578,12 +585,13 @@ export default function QueryPane({
         }}
       >
         <InputGroup
+          className="query-input"
           aria-label="Search the clinical knowledge base. Press slash to focus."
           placeholder="Search the clinical knowledge base"
           leftIcon="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && runQuery()}
+          onKeyDown={(e) => e.key === "Enter" && canRunQuery && runQuery()}
           fill
           inputRef={searchInputRef}
           style={{ fontFamily: "var(--text-mono)" }}
@@ -650,6 +658,7 @@ export default function QueryPane({
           intent={Intent.PRIMARY}
           text="RUN"
           loading={queryState === "loading"}
+          disabled={!canRunQuery || queryState === "loading"}
           onClick={runQuery}
           style={{ flexShrink: 0, fontFamily: "var(--text-mono)", letterSpacing: "0.08em" }}
         />
@@ -658,12 +667,17 @@ export default function QueryPane({
       {/* Synthesis banner — sticky, above the scroll area */}
       {queryState === "results" && (
         <div className="synthesis-banner">
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: synthesisLoading || synthesis ? 6 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: synthesisLoading || synthesis || synthesisError ? 6 : 0 }}>
             <span className="section-label" style={{ margin: 0 }}>
               {clinicianMode ? "CLINICAL SUMMARY" : "AI SYNTHESIS"}
             </span>
             {synthesisLoading && <Tag minimal intent={Intent.PRIMARY} style={{ fontSize: 9 }}>generating…</Tag>}
             {!synthesisLoading && synthesis && <Tag minimal intent={Intent.SUCCESS} style={{ fontSize: 9 }}>done</Tag>}
+            {!synthesisLoading && synthesis && synthesisFallbackUsed && (
+              <Tag minimal intent={Intent.WARNING} style={{ fontSize: 9 }}>
+                Fallback · {synthesisModel ?? "unidentified model"}
+              </Tag>
+            )}
             {!synthesisLoading && synthesis && (
               <Button
                 minimal small
@@ -701,6 +715,20 @@ export default function QueryPane({
                 />
               )}
             </div>
+          ) : synthesisError ? (
+            <Callout intent={Intent.WARNING} icon="warning-sign" title="Synthesis unavailable">
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                <span>{synthesisError.message}</span>
+                <Button
+                  small
+                  minimal
+                  intent={Intent.WARNING}
+                  text="Retry"
+                  onClick={retrySynthesis}
+                  style={{ marginLeft: "auto", flexShrink: 0 }}
+                />
+              </div>
+            </Callout>
           ) : null}
         </div>
       )}
@@ -720,40 +748,44 @@ export default function QueryPane({
       >
 
         {/* Top: Results */}
-        <div style={{ flex: splitPct, overflow: "auto", padding: "10px 14px 14px", minHeight: 0 }}>
+        <div style={{ flex: hasExecutedQuery ? splitPct : 1, overflow: "auto", padding: "10px 14px 14px", minHeight: 0 }}>
           <ResultsPanel />
         </div>
 
-        {/* Vertical drag handle */}
-        <div className="v-split-handle" onMouseDown={onVDragStart}>
-          <div className="v-split-line" />
-          <div className="v-split-grip">···</div>
-        </div>
-
-        {/* Bottom: Provenance | Entity Graph */}
-        <div style={{ flex: 100 - splitPct, display: "flex", overflow: "hidden", minHeight: 0, pointerEvents: vDragging ? "none" : undefined }}>
-
-          {/* Provenance half */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--border)" }}>
-            <div style={{ padding: "4px 12px 3px", borderBottom: "1px solid var(--border-dim)", background: "var(--surface-1)", flexShrink: 0 }}>
-              <span className="section-label" style={{ margin: 0 }}>PROVENANCE</span>
+        {hasExecutedQuery && (
+          <>
+            {/* Vertical drag handle */}
+            <div className="v-split-handle" onMouseDown={onVDragStart}>
+              <div className="v-split-line" />
+              <div className="v-split-grip">···</div>
             </div>
-            <div style={{ flex: 1, overflow: "auto", padding: "8px 12px 12px" }}>
-              <ProvenancePanel />
-            </div>
-          </div>
 
-          {/* Knowledge Graph half */}
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <div style={{ padding: "4px 12px 3px", borderBottom: "1px solid var(--border-dim)", background: "var(--surface-1)", flexShrink: 0 }}>
-                <span className="section-label" style={{ margin: 0 }}>KNOWLEDGE GRAPH</span>
-            </div>
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <GraphPanel />
-            </div>
-          </div>
+            {/* Bottom: Provenance | Entity Graph */}
+            <div style={{ flex: 100 - splitPct, display: "flex", overflow: "hidden", minHeight: 0, pointerEvents: vDragging ? "none" : undefined }}>
 
-        </div>
+              {/* Provenance half */}
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--border)" }}>
+                <div style={{ padding: "4px 12px 3px", borderBottom: "1px solid var(--border-dim)", background: "var(--surface-1)", flexShrink: 0 }}>
+                  <span className="section-label" style={{ margin: 0 }}>PROVENANCE</span>
+                </div>
+                <div style={{ flex: 1, overflow: "auto", padding: "8px 12px 12px" }}>
+                  <ProvenancePanel />
+                </div>
+              </div>
+
+              {/* Knowledge Graph half */}
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                <div style={{ padding: "4px 12px 3px", borderBottom: "1px solid var(--border-dim)", background: "var(--surface-1)", flexShrink: 0 }}>
+                    <span className="section-label" style={{ margin: 0 }}>KNOWLEDGE GRAPH</span>
+                </div>
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <GraphPanel />
+                </div>
+              </div>
+
+            </div>
+          </>
+        )}
       </div>
 
       {!clinicianMode && (

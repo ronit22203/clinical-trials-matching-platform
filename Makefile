@@ -126,17 +126,23 @@ status: ## Show running containers and data artifact counts
 bootstrap: ## Bootstrap Python and Node dependencies
 	@./scripts/bootstrap.sh
 
-validate: ## Check env file, LM Studio, Qdrant, and Neo4j connectivity
+validate: ## Check synthesis primary/fallback, Qdrant, and Neo4j connectivity
 	@bash -c 'set -euo pipefail; \
 		test -f .env.local || { printf "$(RED)FAIL: missing .env.local$(NC)\n"; exit 1; }; \
 		set -a; source .env.local; set +a; \
+		SGLANG_URL="$${SGLANG_BASE_URL:-http://localhost:30000/v1}"; \
 		LM_STUDIO_URL="$${LM_STUDIO_BASE_URL:-http://localhost:1234/v1}"; \
 		QDRANT_ADDR="$${QDRANT_URL:-http://localhost:6333}"; \
 		NEO4J_BOLT="$${NEO4J_URI:-bolt://localhost:7687}"; \
-		printf "Checking LM Studio at $$LM_STUDIO_URL\n"; \
-		curl --fail --silent "$$LM_STUDIO_URL/models" >/dev/null \
-			&& printf "  $(GREEN)LM Studio OK$(NC)\n" \
-			|| { printf "  $(RED)FAIL: LM Studio not reachable$(NC)\n"; exit 1; }; \
+		printf "Checking SGLang primary at $$SGLANG_URL\n"; \
+		if curl --fail --silent "$$SGLANG_URL/models" >/dev/null; then \
+			printf "  $(GREEN)SGLang primary OK$(NC)\n"; \
+		else \
+			printf "  $(YELLOW)SGLang primary unavailable; checking LM Studio fallback at $$LM_STUDIO_URL$(NC)\n"; \
+			curl --fail --silent "$$LM_STUDIO_URL/models" >/dev/null \
+				&& printf "  $(GREEN)LM Studio fallback OK$(NC)\n" \
+				|| { printf "  $(RED)FAIL: neither SGLang nor LM Studio is reachable$(NC)\n"; exit 1; }; \
+		fi; \
 		printf "Checking Qdrant at $$QDRANT_ADDR\n"; \
 		curl --fail --silent "$$QDRANT_ADDR/collections" >/dev/null \
 			&& printf "  $(GREEN)Qdrant OK$(NC)\n" \

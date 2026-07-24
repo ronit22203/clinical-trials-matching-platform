@@ -119,7 +119,8 @@ def _graphrag_to_matches(evidence: dict) -> list[dict]:
         matches.append(
             {
                 "chunkIndex": hit.get("chunk_index", i),
-                "score": hit.get("reranker_score") or hit.get("score", 0),
+                "score": hit.get("score", 0),
+                "rankScore": hit.get("reranker_score"),
                 "source": source,
                 "content": hit.get("content", ""),
                 "context": hit.get("context") or "",
@@ -157,6 +158,7 @@ async def match(
             "found": evidence.get("found", False),
             "matches": matches,
             "graphFacts": evidence.get("graph_facts", []),
+            "graphAnchor": evidence.get("graph_anchor"),
             "latency_ms": latency_ms,
         }
     )
@@ -210,6 +212,82 @@ async def stats() -> JSONResponse:
     return JSONResponse(None)
 
 
+@app.get("/api/health")
+async def health() -> JSONResponse:
+    """Report synthesis-provider readiness without loading retrieval clients."""
+    from pydantic import ValidationError
+
+    from .config import load_config
+    from .llm_factory import check_llm_health
+
+    try:
+        config = load_config()
+    except ValidationError as exc:
+        logger.error("Reasoning configuration is invalid: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unavailable",
+                "synthesis": {
+                    "primary": None,
+                    "fallback": None,
+                    "detail": "Reasoning configuration is invalid.",
+                },
+            },
+        )
+
+    loop = asyncio.get_running_loop()
+
+    def _probe() -> tuple[Any, Any | None]:
+        primary = check_llm_health(
+            config.model,
+            config.health_check_timeout_seconds,
+        )
+        fallback = (
+            check_llm_health(
+                config.fallback_model,
+                config.health_check_timeout_seconds,
+            )
+            if config.fallback_model
+            else None
+        )
+        return primary, fallback
+
+    primary, fallback = await loop.run_in_executor(None, _probe)
+    active_model = (
+        config.model
+        if primary.available
+        else config.fallback_model
+        if fallback and fallback.available
+        else None
+    )
+    status = "ready" if primary.available else "degraded" if active_model else "unavailable"
+    status_code = 200 if active_model else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": status,
+            "synthesis": {
+                "primary": {
+                    "model": config.model,
+                    "available": primary.available,
+                    "detail": primary.detail,
+                },
+                "fallback": (
+                    {
+                        "model": config.fallback_model,
+                        "available": fallback.available,
+                        "detail": fallback.detail,
+                    }
+                    if fallback
+                    else None
+                ),
+                "active_model": active_model,
+            },
+        },
+    )
+
+
 @app.get("/api/pdf/{doi_path:path}")
 async def serve_pdf(doi_path: str) -> FileResponse:
     """Stream a PDF from data/pdfs/raw/."""
@@ -244,7 +322,18 @@ async def heatmap(query: str, chunk_index: int = 0) -> JSONResponse:
             hits = graphrag._qdrant_client().scroll(
                 collection_name=graphrag.config["collection"],
                 scroll_filter=Filter(
-                    must=[FieldCondition(key="chunk_index", match=MatchValue(value=chunk_index))]
+                    must=[
+                        FieldCondition(
+                            key="chunk_index",
+                            match=MatchValue(value=chunk_index),
+                        ),
+                        FieldCondition(
+                            key="scope",
+                            match=MatchValue(
+                                value=graphrag.config.get("scope", "literature")
+                            ),
+                        ),
+                    ]
                 ),
                 limit=1,
                 with_payload=True,
@@ -282,8 +371,10 @@ async def subgraph(entity: str) -> JSONResponse:
 
     cypher = """
         MATCH (h)-[r]->(t)
-        WHERE toLower(h.name) CONTAINS toLower($entity)
+        WHERE r.scope = $scope
+          AND (toLower(h.name) CONTAINS toLower($entity)
            OR toLower(t.name) CONTAINS toLower($entity)
+          )
         RETURN h.name AS head, type(r) AS relation, t.name AS tail,
                labels(h)[0] AS head_label, labels(t)[0] AS tail_label
         LIMIT 60
@@ -292,7 +383,13 @@ async def subgraph(entity: str) -> JSONResponse:
     def _query() -> dict:
         try:
             with graphrag._neo4j_driver().session() as session:
-                records = list(session.run(cypher, entity=entity))
+                records = list(
+                    session.run(
+                        cypher,
+                        entity=entity,
+                        scope=graphrag.config.get("scope", "literature"),
+                    )
+                )
         except Exception as exc:
             logger.warning("subgraph query failed: %s", exc)
             return {"entity": entity, "nodes": [], "links": []}
@@ -338,24 +435,26 @@ async def synthesis(req: SynthesisRequest) -> JSONResponse:
             ev = {"found": False}
         _cache_put(req.query, ev)
 
-    def _synthesize() -> str:
-        from .agent import _format_evidence, _NO_EVIDENCE_RESPONSE
-        from langchain_core.messages import HumanMessage, SystemMessage
+    from .agent import LLMUnavailableError
 
-        if not ev.get("found"):
-            return _NO_EVIDENCE_RESPONSE
+    try:
+        result = await loop.run_in_executor(None, agent.synthesize, req.query, ev)
+    except LLMUnavailableError as exc:
+        logger.warning("Synthesis unavailable for query=%r: %s", req.query, exc.detail)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "synthesis_unavailable",
+                "message": exc.detail,
+                "retryable": True,
+            },
+        ) from exc
 
-        context = _format_evidence(ev)
-        messages = [
-            SystemMessage(content=agent.config.system_prompt),
-            HumanMessage(
-                content=f"[QUERY]\n{req.query}\n\n[EVIDENCE]\n{context}\n[/EVIDENCE]"
-            ),
-        ]
-        resp = agent.llm.invoke(messages)
-        return resp.content or _NO_EVIDENCE_RESPONSE
-
-    text = await loop.run_in_executor(None, _synthesize)
-    model_name = agent.config.model
-
-    return JSONResponse({"synthesis": text, "model": model_name, "tokensUsed": None})
+    return JSONResponse(
+        {
+            "synthesis": result.text,
+            "model": result.model,
+            "fallbackUsed": result.fallback_used,
+            "tokensUsed": None,
+        }
+    )

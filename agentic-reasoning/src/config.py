@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 APP_CONFIG_PATH = _REPO_ROOT / "config" / "app.yaml"
@@ -37,6 +37,8 @@ class GraphRAGConfig(BaseModel):
     neo4j_uri: str = "bolt://localhost:7687"
     neo4j_username: str = "neo4j"
     neo4j_password: str = "password"
+    scope: str = "literature"
+    min_relevance_score: float = Field(default=0.35, ge=-1.0, le=1.0)
     limit: int = 3
     neo4j_limit: int = 10
     reranker_model: Optional[str] = None
@@ -47,6 +49,8 @@ class GraphRAGConfig(BaseModel):
 
 class AgentConfig(BaseModel):
     model: str = "lmstudio/qwen3-8b"
+    fallback_model: Optional[str] = None
+    health_check_timeout_seconds: float = Field(default=2.0, gt=0.0, le=30.0)
     system_prompt: str = (
         "You are a clinical research assistant. "
         "Answer ONLY using the evidence retrieved from the knowledge base. "
@@ -54,6 +58,29 @@ class AgentConfig(BaseModel):
     )
     model_params: ModelParams = Field(default_factory=ModelParams)
     graphrag: GraphRAGConfig = Field(default_factory=GraphRAGConfig)
+
+    @field_validator("model")
+    @classmethod
+    def primary_model_has_provider_and_name(cls, value: str) -> str:
+        return cls._validate_model_identifier(value, field_name="model")
+
+    @field_validator("fallback_model")
+    @classmethod
+    def fallback_model_has_provider_and_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return cls._validate_model_identifier(value, field_name="fallback_model")
+
+    @staticmethod
+    def _validate_model_identifier(value: str, *, field_name: str) -> str:
+        normalized = value.strip()
+        provider, separator, model_name = normalized.partition("/")
+        if not provider or not separator or not model_name.strip():
+            raise ValueError(
+                f"{field_name} must use the provider/model-name format; "
+                "set the corresponding environment variable before startup."
+            )
+        return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +131,8 @@ def load_config(path: Path | None = None) -> AgentConfig:
 
     return AgentConfig(
         model=agent_section.get("model", ar.get("defaults", {}).get("model", "lmstudio/qwen3-8b")),
+        fallback_model=agent_section.get("fallback_model"),
+        health_check_timeout_seconds=agent_section.get("health_check_timeout_seconds", 2.0),
         system_prompt=agent_section.get("system_prompt", AgentConfig.model_fields["system_prompt"].default),
         model_params=ModelParams(**model_params_data) if model_params_data else ModelParams(),
         graphrag=GraphRAGConfig(**graphrag_data) if graphrag_data else GraphRAGConfig(),

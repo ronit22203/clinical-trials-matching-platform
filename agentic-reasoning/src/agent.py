@@ -17,15 +17,34 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
+import httpx
+from openai import APIConnectionError, APITimeoutError
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from .config import AgentConfig, load_config
-from .llm_factory import build_llm
+from .llm_factory import build_llm, check_llm_health
 from .tools.graphrag import GraphRAGTool
 
 logger = logging.getLogger(__name__)
 
 _NO_EVIDENCE_RESPONSE = "No evidence found for this query."
+
+
+class LLMUnavailableError(RuntimeError):
+    """Raised when neither the configured primary nor fallback LLM can serve."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+@dataclass(frozen=True)
+class SynthesisResult:
+    """A grounded synthesis together with the serving model metadata."""
+
+    text: str
+    model: str | None
+    fallback_used: bool
 
 
 @dataclass
@@ -34,6 +53,8 @@ class RunResult:
     evidence: dict[str, Any]
     synthesis: str
     latency_ms: float
+    synthesis_model: str | None = None
+    fallback_used: bool = False
     found: bool = field(init=False)
 
     def __post_init__(self) -> None:
@@ -50,7 +71,7 @@ def _format_evidence(evidence: dict[str, Any]) -> str:
     vector_results: list[dict] = evidence.get("vector_results", [])
     for i, hit in enumerate(vector_results, 1):
         source = hit.get("source", "unknown")
-        score = hit.get("reranker_score") or hit.get("score", 0)
+        score = hit.get("score", 0)
         content = hit.get("content", "").strip()
         parts.append(f"[{i}] source={source} score={score:.4f}\n{content}")
 
@@ -69,6 +90,11 @@ class Agent:
         self.config = config
         params = config.model_params.model_dump(exclude_none=True)
         self.llm = build_llm(config.model, **params)
+        self.fallback_llm = (
+            build_llm(config.fallback_model, **params)
+            if config.fallback_model
+            else None
+        )
         self.graphrag = GraphRAGTool(config.graphrag.model_dump())
 
     @classmethod
@@ -91,6 +117,92 @@ class Agent:
             HumanMessage(content=user_content),
         ]
 
+    def _select_synthesis_llm(self) -> tuple[Any, str, bool]:
+        """Return a healthy primary model or an explicitly configured fallback."""
+        timeout = self.config.health_check_timeout_seconds
+        primary_health = check_llm_health(self.config.model, timeout)
+        if primary_health.available:
+            return self.llm, self.config.model, False
+
+        fallback_model = self.config.fallback_model
+        if fallback_model and self.fallback_llm is not None:
+            fallback_health = check_llm_health(fallback_model, timeout)
+            if fallback_health.available:
+                logger.warning(
+                    "Primary LLM unavailable; using configured fallback: primary=%s fallback=%s",
+                    self.config.model,
+                    fallback_model,
+                )
+                return self.fallback_llm, fallback_model, True
+            raise LLMUnavailableError(
+                "Synthesis is unavailable: "
+                f"primary ({self.config.model}) health check failed: {primary_health.detail}; "
+                f"fallback ({fallback_model}) health check failed: {fallback_health.detail}"
+            )
+
+        raise LLMUnavailableError(
+            "Synthesis is unavailable: "
+            f"primary ({self.config.model}) health check failed: {primary_health.detail}; "
+            "no fallback model is configured."
+        )
+
+    def synthesize(self, query: str, evidence: dict[str, Any]) -> SynthesisResult:
+        """Produce a strictly evidence-grounded synthesis with explicit failover."""
+        if not evidence.get("found", False):
+            return SynthesisResult(
+                text=_NO_EVIDENCE_RESPONSE,
+                model=None,
+                fallback_used=False,
+            )
+
+        messages = self._build_messages(query, evidence)
+        llm, model, fallback_used = self._select_synthesis_llm()
+        try:
+            response = llm.invoke(messages)
+        except (APIConnectionError, APITimeoutError, httpx.HTTPError, ConnectionError, TimeoutError) as exc:
+            if fallback_used or not self.config.fallback_model or self.fallback_llm is None:
+                raise LLMUnavailableError(
+                    f"Synthesis invocation failed for {model}: {type(exc).__name__}: {exc}"
+                ) from exc
+
+            fallback_model = self.config.fallback_model
+            fallback_health = check_llm_health(
+                fallback_model,
+                self.config.health_check_timeout_seconds,
+            )
+            if not fallback_health.available:
+                raise LLMUnavailableError(
+                    "Synthesis is unavailable after primary invocation failed: "
+                    f"primary ({model}) error={type(exc).__name__}: {exc}; "
+                    f"fallback ({fallback_model}) health check failed: {fallback_health.detail}"
+                ) from exc
+
+            logger.warning(
+                "Primary LLM invocation failed; retrying configured fallback: "
+                "primary=%s fallback=%s error=%s",
+                model,
+                fallback_model,
+                type(exc).__name__,
+            )
+            try:
+                response = self.fallback_llm.invoke(messages)
+            except (APIConnectionError, APITimeoutError, httpx.HTTPError, ConnectionError, TimeoutError) as fallback_exc:
+                raise LLMUnavailableError(
+                    f"Synthesis invocation failed for fallback {fallback_model}: "
+                    f"{type(fallback_exc).__name__}: {fallback_exc}"
+                ) from fallback_exc
+            return SynthesisResult(
+                text=response.content or _NO_EVIDENCE_RESPONSE,
+                model=fallback_model,
+                fallback_used=True,
+            )
+
+        return SynthesisResult(
+            text=response.content or _NO_EVIDENCE_RESPONSE,
+            model=model,
+            fallback_used=fallback_used,
+        )
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -112,13 +224,8 @@ class Agent:
         )
 
         # Phase 2: grounded synthesis
-        if not evidence.get("found", False):
-            synthesis = _NO_EVIDENCE_RESPONSE
-        else:
-            logger.info("Phase 2 — LLM synthesis from evidence")
-            messages = self._build_messages(query, evidence)
-            response = self.llm.invoke(messages)
-            synthesis = response.content
+        logger.info("Phase 2 — LLM synthesis from evidence")
+        synthesis_result = self.synthesize(query, evidence)
 
         latency_ms = (time.perf_counter() - t0) * 1000
         logger.info("Run complete in %.0fms", latency_ms)
@@ -126,8 +233,10 @@ class Agent:
         return RunResult(
             query=query,
             evidence=evidence,
-            synthesis=synthesis,
+            synthesis=synthesis_result.text,
             latency_ms=latency_ms,
+            synthesis_model=synthesis_result.model,
+            fallback_used=synthesis_result.fallback_used,
         )
 
     def stream(self, query: str) -> Iterator[str]:
@@ -154,10 +263,12 @@ class Agent:
             yield _NO_EVIDENCE_RESPONSE
             return
 
-        # Phase 2: stream synthesis tokens
+        # Phase 2: stream synthesis tokens. The selected provider is checked
+        # before streaming so an unavailable primary can use the fallback.
         logger.info("Phase 2 — streaming synthesis")
         messages = self._build_messages(query, evidence)
-        for chunk in self.llm.stream(messages):
+        llm, _, _ = self._select_synthesis_llm()
+        for chunk in llm.stream(messages):
             token = chunk.content or ""
             if token:
                 yield token
@@ -169,6 +280,8 @@ class Agent:
             "query": result.query,
             "synthesis": result.synthesis,
             "found": result.found,
+            "synthesis_model": result.synthesis_model,
+            "fallback_used": result.fallback_used,
             "latency_ms": round(result.latency_ms, 1),
             "evidence": result.evidence,
         }

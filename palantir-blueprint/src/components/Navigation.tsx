@@ -34,7 +34,7 @@ export default function Navigation({ clinicianMode, theme, onModeToggle, onTheme
       </NavbarGroup>
       <NavbarGroup align="right" className="app-navbar-actions">
         <Tag
-          className="app-navbar-mode"
+          className="app-navbar-mode app-navbar-mode--active"
           minimal
           intent={clinicianMode ? Intent.PRIMARY : Intent.WARNING}
           title={clinicianMode ? "Clinical mode: simplified view for clinicians" : "Audit mode: full technical detail"}

@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 
-from src.agent import Agent, _format_evidence, _NO_EVIDENCE_RESPONSE
+from src.agent import Agent, LLMUnavailableError, _format_evidence, _NO_EVIDENCE_RESPONSE
 from src.config import AgentConfig, GraphRAGConfig, ModelParams
+from src.llm_factory import LLMEndpoint, LLMHealth
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +78,35 @@ def _make_agent(evidence: dict[str, Any]) -> Agent:
     mock_llm.invoke.return_value = mock_response
     mock_llm.stream.return_value = iter([mock_response])
     agent.llm = mock_llm
+    agent.fallback_llm = None
+    agent._select_synthesis_llm = MagicMock(return_value=(mock_llm, config.model, False))
 
+    return agent
+
+
+def _health(model: str, available: bool, detail: str | None = None) -> LLMHealth:
+    provider, _, model_name = model.partition("/")
+    return LLMHealth(
+        endpoint=LLMEndpoint(
+            provider=provider,
+            model_name=model_name,
+            base_url="http://localhost:1234/v1",
+        ),
+        available=available,
+        detail=detail,
+    )
+
+
+def _make_failover_agent() -> Agent:
+    config = AgentConfig(
+        model="sglang/primary-model",
+        fallback_model="lmstudio/fallback-model",
+        system_prompt="Test system prompt.",
+    )
+    agent = Agent.__new__(Agent)
+    agent.config = config
+    agent.llm = MagicMock()
+    agent.fallback_llm = MagicMock()
     return agent
 
 
@@ -139,6 +169,39 @@ class TestPhase2Synthesis:
         tokens = list(agent.stream("unknown drug"))
         agent.llm.stream.assert_not_called()
         assert "".join(tokens) == _NO_EVIDENCE_RESPONSE
+
+
+class TestSynthesisFailover:
+    def test_uses_fallback_after_primary_health_check_fails(self):
+        agent = _make_failover_agent()
+        agent.fallback_llm.invoke.return_value = MagicMock(content="Fallback answer.")
+
+        with patch(
+            "src.agent.check_llm_health",
+            side_effect=[
+                _health(agent.config.model, False, "connection refused"),
+                _health(agent.config.fallback_model or "", True),
+            ],
+        ):
+            result = agent.synthesize("query", EVIDENCE_WITH_RESULTS)
+
+        agent.llm.invoke.assert_not_called()
+        agent.fallback_llm.invoke.assert_called_once()
+        assert result.text == "Fallback answer."
+        assert result.model == "lmstudio/fallback-model"
+        assert result.fallback_used is True
+
+    def test_raises_when_primary_and_fallback_are_unavailable(self):
+        agent = _make_failover_agent()
+
+        with patch(
+            "src.agent.check_llm_health",
+            side_effect=[
+                _health(agent.config.model, False, "connection refused"),
+                _health(agent.config.fallback_model or "", False, "connection refused"),
+            ],
+        ), pytest.raises(LLMUnavailableError, match="Synthesis is unavailable"):
+            agent.synthesize("query", EVIDENCE_WITH_RESULTS)
 
 
 # ---------------------------------------------------------------------------

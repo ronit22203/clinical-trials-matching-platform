@@ -23,6 +23,8 @@ BASE_CONFIG = {
     "neo4j_uri": "bolt://localhost:7687",
     "neo4j_username": "neo4j",
     "neo4j_password": "password",
+    "scope": "literature",
+    "min_relevance_score": 0.35,
     "limit": 2,
     "neo4j_limit": 5,
     "reranker_model": None,
@@ -98,6 +100,25 @@ class TestGraphRAGToolExecute:
         assert result["found"] is False
         assert result["vector_results"] == []
 
+    def test_rejects_low_relevance_vector_results(self):
+        tool = self._make_tool()
+        low_relevance = [
+            {
+                "score": 0.01,
+                "content": "Unrelated chart text.",
+                "source": "patient.pdf",
+                "chunk_id": "c1",
+                "chunk_index": 0,
+                "context": None,
+            }
+        ]
+        with patch.object(tool, "_vector_search", return_value=low_relevance), \
+             patch.object(tool, "_graph_context", return_value=[]):
+            result = tool.execute("post-exposure prophylaxis")
+
+        assert result["found"] is False
+        assert result["vector_results"] == []
+
     def test_graph_facts_included(self):
         tool = self._make_tool()
         mock_vector_results = [
@@ -110,6 +131,7 @@ class TestGraphRAGToolExecute:
             result = tool.execute("DrugA treatment")
 
         assert result["graph_facts"] == graph_facts
+        assert result["graph_anchor"] == "DrugA"
 
     def test_empty_query_returns_error(self):
         tool = self._make_tool()

@@ -353,14 +353,26 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
+  function selectFile(file: File | null) {
+    if (!file || (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf"))) return;
+
+    setSelectedFile(file);
+    setDone(false);
+    setLogLines([]);
+    setJobId(null);
+    setOcrVizUrl(null);
+    setOcrPage(1);
+    setOcrPageCount(1);
+    setLiveChunks([]);
+    setCleanedMarkdown("");
+    setRawOcrText("");
+    setSteps(INITIAL_STEPS);
+  }
+
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setIsDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file?.type === "application/pdf") {
-      setSelectedFile(file);
-      setDone(false);
-    }
+    selectFile(e.dataTransfer.files[0] ?? null);
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -567,8 +579,16 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
     return Intent.NONE;
   }
 
+  const isIdle = !running && !done && logLines.length === 0;
+
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div
+      className="ingestion-pane"
+      style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}
+      onDrop={isIdle ? handleDrop : undefined}
+      onDragOver={isIdle ? handleDragOver : undefined}
+      onDragLeave={isIdle ? handleDragLeave : undefined}
+    >
 
       {/* Header */}
       <div
@@ -590,23 +610,19 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
           accept=".pdf"
           style={{ display: "none" }}
           onChange={(e) => {
-            const f = e.target.files?.[0] ?? null;
-            setSelectedFile(f);
-            if (f) setDone(false);
+            selectFile(e.target.files?.[0] ?? null);
+            e.currentTarget.value = "";
           }}
         />
-        {selectedFile && !running && (
-          <Tag minimal icon="document" style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {selectedFile.name}
-          </Tag>
-        )}
         {!running && (
           <Button
+            className="file-picker-button"
             icon="folder-open"
             small
             minimal
-            text={selectedFile ? "Change" : "Choose PDF"}
+            text={selectedFile?.name ?? "Choose PDF"}
             onClick={() => fileRef.current?.click()}
+            title={selectedFile ? `Choose a different PDF (currently ${selectedFile.name})` : "Choose a PDF"}
           />
         )}
         {done && <Tag intent={Intent.SUCCESS} icon="tick-circle" minimal>{clinicianMode ? "Done" : "Complete"}</Tag>}
@@ -625,6 +641,7 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
       </div>
 
       <div
+        className={`ingestion-content${isIdle ? " ingestion-content--idle" : ""}`}
         style={{
           flex: 1,
           overflow: "auto",
@@ -636,13 +653,9 @@ export default function IngestionPane({ clinicianMode }: { clinicianMode: boolea
       >
 
         {/* Idle state — drag-and-drop zone */}
-        {!running && !done && logLines.length === 0 && (
+        {isIdle && (
           <div
-            className={`drop-zone${isDragOver ? " drop-zone--active" : ""}`}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            style={{ flex: selectedFile ? undefined : 1, minHeight: selectedFile ? undefined : 120 }}
+            className={`drop-zone drop-zone--large${isDragOver ? " drop-zone--active" : ""}`}
           >
             {selectedFile ? (
               <PdfPreview file={selectedFile} onStart={startIngestion} clinicianMode={clinicianMode} />

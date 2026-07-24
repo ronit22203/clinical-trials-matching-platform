@@ -97,11 +97,22 @@ class GraphRAGTool(BaseTool):
     # ------------------------------------------------------------------
 
     def _vector_search(self, query: str, fetch_limit: int) -> List[Dict]:
+        from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+
         query_vector = self._embedder_model().encode(query).tolist()
+        scope = self.config.get("scope", "literature")
         hits = self._qdrant_client().query_points(
             collection_name=self.config["collection"],
             query=query_vector,
             limit=fetch_limit,
+            query_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="scope",
+                        match=MatchValue(value=scope),
+                    )
+                ]
+            ),
         ).points
         return [
             {
@@ -111,6 +122,7 @@ class GraphRAGTool(BaseTool):
                 "chunk_id": hit.payload.get("chunk_id"),
                 "chunk_index": hit.payload.get("chunk_index"),
                 "context": hit.payload.get("context"),
+                "scope": hit.payload.get("scope"),
             }
             for hit in hits
         ]
@@ -121,7 +133,8 @@ class GraphRAGTool(BaseTool):
             return []
         cypher = """
             MATCH (h)-[r]->(t)
-            WHERE any(kw IN $keywords
+            WHERE r.scope = $scope
+              AND any(kw IN $keywords
                       WHERE toLower(h.name) CONTAINS toLower(kw)
                          OR toLower(t.name) CONTAINS toLower(kw))
             RETURN h.name AS head, type(r) AS relation, t.name AS tail
@@ -129,7 +142,14 @@ class GraphRAGTool(BaseTool):
         """
         try:
             with self._neo4j_driver().session() as session:
-                records = list(session.run(cypher, keywords=keywords, limit=limit))
+                records = list(
+                    session.run(
+                        cypher,
+                        keywords=keywords,
+                        limit=limit,
+                        scope=self.config.get("scope", "literature"),
+                    )
+                )
             return [f"{r['head']} --[{r['relation']}]--> {r['tail']}" for r in records]
         except Exception as exc:
             logger.warning("Neo4j query failed: %s", exc)
@@ -163,6 +183,13 @@ class GraphRAGTool(BaseTool):
             logger.error("Vector search failed: %s", exc)
             return f"Error: Vector search failed — {exc}"
 
+        min_relevance_score = float(self.config.get("min_relevance_score", 0.35))
+        candidates = [
+            candidate
+            for candidate in candidates
+            if candidate["score"] >= min_relevance_score
+        ]
+
         if reranker is not None and candidates:
             pairs = [(query, c["content"]) for c in candidates]
             scores: List[float] = reranker.predict(pairs).tolist()
@@ -177,6 +204,11 @@ class GraphRAGTool(BaseTool):
         vector_results = candidates[:limit]
 
         graph_facts = self._graph_context(keywords, neo4j_limit)
+        graph_anchor = None
+        if graph_facts:
+            match = re.match(r"^(.+?)\s+--\[", graph_facts[0].strip())
+            if match:
+                graph_anchor = match.group(1).strip()
 
         return {
             "found": bool(vector_results or graph_facts),
@@ -185,5 +217,5 @@ class GraphRAGTool(BaseTool):
             "keywords": keywords,
             "vector_results": vector_results,
             "graph_facts": graph_facts,
+            "graph_anchor": graph_anchor,
         }
-

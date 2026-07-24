@@ -230,6 +230,12 @@ body::before {
   letter-spacing: 0.08em !important;
 }
 
+.app-navbar .bp6-tag.app-navbar-mode--active {
+  background: var(--primary-action) !important;
+  border-color: var(--primary-action) !important;
+  color: var(--primary-action-text) !important;
+}
+
 .app-navbar-divider {
   width: 1px;
   height: 16px;
@@ -346,6 +352,15 @@ body::before {
 
 .bp6-input-group .bp6-input-left-container .bp6-icon {
   color: var(--text-secondary) !important;
+}
+
+.query-input .bp6-input {
+  border-color: var(--border-strong) !important;
+}
+
+.query-empty-state .bp6-non-ideal-state-title {
+  font-size: 16px !important;
+  font-weight: 600 !important;
 }
 
 kbd.search-shortcut {
@@ -887,6 +902,28 @@ kbd.search-shortcut {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.ingestion-content--idle {
+  overflow: hidden !important;
+}
+
+.drop-zone--large {
+  flex: 1;
+  min-height: 300px;
+  padding: 24px;
+  border-width: 1px;
+  border-color: var(--border-strong);
+}
+
+.file-picker-button {
+  max-width: 180px;
+}
+
+.file-picker-button .bp6-button-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drop-zone--active {

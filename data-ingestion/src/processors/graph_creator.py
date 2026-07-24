@@ -17,17 +17,22 @@ Key design decisions vs. the standalone build_knowledge_graph.py script:
     extracts the first {...} object from free-text responses.
 """
 
+import hashlib
 import json
 import logging
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 
 import requests
 from neo4j import GraphDatabase
 
 logger = logging.getLogger(__name__)
+
+_MANIFEST_VERSION = 2
+_MANIFEST_FILENAME = ".kg_progress.json"
+Endpoint: TypeAlias = tuple[str, str, str]
 
 # ---------------------------------------------------------------------------
 # Prompt template
@@ -248,6 +253,9 @@ class GraphCreator:
             "chat_url", "http://localhost:1234/v1/chat/completions"
         )
         self.model: str = kg_cfg.get("model", "qwen3-8b")
+        self.fallback_chat_url: str | None = kg_cfg.get("fallback_chat_url")
+        self.fallback_model: str | None = kg_cfg.get("fallback_model")
+        self.health_timeout: float = float(kg_cfg.get("health_timeout_seconds", 2))
         self.max_retries: int = kg_cfg.get("max_retries", 2)
         self.timeout: int = kg_cfg.get("timeout_seconds", 180)
         self.max_tokens: int = kg_cfg.get("max_tokens", 768)
@@ -278,6 +286,14 @@ class GraphCreator:
 
         # None → not yet probed; True/False → result of first call
         self._json_schema_supported: bool | None = None
+        self._primary_endpoint: Endpoint = ("primary", self.chat_url, self.model)
+        self._fallback_endpoint: Endpoint | None = (
+            ("fallback", self.fallback_chat_url, self.fallback_model)
+            if self.fallback_chat_url and self.fallback_model
+            else None
+        )
+        self._active_chat_url = self.chat_url
+        self._active_model = self.model
 
         try:
             self._driver = GraphDatabase.driver(neo4j_uri, auth=neo4j_auth)
@@ -301,9 +317,74 @@ class GraphCreator:
 
     # ── LLM call ──────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _health_url(chat_url: str) -> str:
+        """Return the local server health endpoint associated with a chat URL."""
+        marker = "/v1/chat/completions"
+        if marker in chat_url:
+            return f"{chat_url.split(marker, 1)[0]}/health"
+        marker = "/chat/completions"
+        if marker in chat_url:
+            return f"{chat_url.split(marker, 1)[0]}/health"
+        return f"{chat_url.rstrip('/')}/health"
+
+    def _is_endpoint_healthy(self, endpoint: Endpoint) -> bool:
+        """Check a local inference endpoint without submitting clinical text."""
+        name, chat_url, _ = endpoint
+        health_url = self._health_url(chat_url)
+        try:
+            response = requests.get(health_url, timeout=self.health_timeout)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            logger.info(
+                "event=kg_endpoint_unhealthy endpoint=%s reason=%s",
+                name,
+                type(exc).__name__,
+            )
+            return False
+        except requests.exceptions.RequestException as exc:
+            logger.info(
+                "event=kg_endpoint_unhealthy endpoint=%s reason=%s",
+                name,
+                type(exc).__name__,
+            )
+            return False
+
+        if response.ok:
+            return True
+        logger.info(
+            "event=kg_endpoint_unhealthy endpoint=%s status=%s",
+            name,
+            response.status_code,
+        )
+        return False
+
+    def _select_healthy_endpoint(self) -> Endpoint | None:
+        """Prefer SGLang and use the configured local fallback only when needed."""
+        if self._is_endpoint_healthy(self._primary_endpoint):
+            return self._primary_endpoint
+        if self._fallback_endpoint and self._is_endpoint_healthy(self._fallback_endpoint):
+            logger.info("event=kg_endpoint_selected endpoint=fallback")
+            return self._fallback_endpoint
+        logger.warning(
+            "event=kg_extractor_unavailable primary=%s fallback_configured=%s",
+            self.chat_url,
+            self._fallback_endpoint is not None,
+        )
+        return None
+
+    def _healthy_fallback(self) -> Endpoint | None:
+        """Return a verified fallback endpoint for a post-health connection loss."""
+        if self._fallback_endpoint and self._is_endpoint_healthy(self._fallback_endpoint):
+            return self._fallback_endpoint
+        return None
+
+    def _activate_endpoint(self, endpoint: Endpoint) -> None:
+        """Set the request target selected by the endpoint health check."""
+        _, self._active_chat_url, self._active_model = endpoint
+
     def _post(self, prompt: str, use_schema: bool) -> requests.Response:
         payload: dict[str, Any] = {
-            "model": self.model,
+            "model": self._active_model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
             "temperature": 0.0,
@@ -317,11 +398,28 @@ class GraphCreator:
             payload["response_format"] = _RESPONSE_SCHEMA
 
         return requests.post(
-            self.chat_url,
+            self._active_chat_url,
             headers={"Authorization": "Bearer lm-studio"},
             json=payload,
             timeout=self.timeout,
         )
+
+    def _post_with_failover(
+        self, prompt: str, use_schema: bool, endpoint: Endpoint
+    ) -> tuple[requests.Response, Endpoint]:
+        """Post once, retrying a primary connection loss on a healthy fallback."""
+        self._activate_endpoint(endpoint)
+        try:
+            return self._post(prompt, use_schema), endpoint
+        except requests.exceptions.ConnectionError:
+            if endpoint[0] != "primary":
+                raise
+            fallback = self._healthy_fallback()
+            if fallback is None:
+                raise
+            logger.warning("event=kg_endpoint_failover from=primary to=fallback")
+            self._activate_endpoint(fallback)
+            return self._post(prompt, use_schema), fallback
 
     def extract_triplets(self, text: str) -> list[dict] | None:
         """
@@ -342,11 +440,16 @@ class GraphCreator:
             return []
 
         prompt = self._build_prompt(text)
+        endpoint = self._select_healthy_endpoint()
+        if endpoint is None:
+            return None
 
         for attempt in range(self.max_retries):
             use_schema = self._json_schema_supported is not False
             try:
-                resp = self._post(prompt, use_schema=use_schema)
+                resp, endpoint = self._post_with_failover(
+                    prompt, use_schema=use_schema, endpoint=endpoint
+                )
 
                 # Distinguish a genuine json_schema rejection from other 400s
                 # (e.g. "Failed to load model") before downgrading schema mode.
@@ -357,7 +460,9 @@ class GraphCreator:
                             "Server rejected response_format; switching to text mode"
                         )
                         self._json_schema_supported = False
-                        resp = self._post(prompt, use_schema=False)
+                        resp, endpoint = self._post_with_failover(
+                            prompt, use_schema=False, endpoint=endpoint
+                        )
                     else:
                         logger.warning(
                             "LLM HTTP 400 (attempt %d) — not a schema error: %s",
@@ -423,7 +528,8 @@ class GraphCreator:
         chunk_id: int,
         byte_start: int | None = None,
         byte_end: int | None = None,
-    ) -> None:
+        scope: str = "literature",
+    ) -> int:
         """Upsert *triplets* into Neo4j as typed Entity relationships.
 
         Args:
@@ -432,9 +538,13 @@ class GraphCreator:
             chunk_id:    Index of the chunk within the source file.
             byte_start:  Character offset of the chunk's raw content in the cleaned markdown.
             byte_end:    End character offset (exclusive) of the chunk's raw content.
+            scope:       Data domain used to keep literature and patient facts separate.
+
+        Returns:
+            Number of source-scoped relationships written.
         """
         if not triplets:
-            return
+            return 0
 
         with self._driver.session() as session:
             for t in triplets:
@@ -453,133 +563,282 @@ class GraphCreator:
                 query = f"""
                 MERGE (h:Entity {{name: $head}})
                 MERGE (t:Entity {{name: $tail}})
-                MERGE (h)-[r:{rel_type}]->(t)
-                SET r.source = $source, r.chunk_id = $chunk_id,
-                    r.byte_start = $byte_start, r.byte_end = $byte_end,
-                    r.tier = $tier
+                MERGE (h)-[r:{rel_type} {{
+                    source: $source, chunk_id: $chunk_id, scope: $scope
+                }}]->(t)
+                SET r.byte_start = $byte_start, r.byte_end = $byte_end, r.tier = $tier
                 """
-                try:
-                    session.run(
-                        query, head=head, tail=tail,
-                        source=source_file, chunk_id=chunk_id,
-                        byte_start=byte_start, byte_end=byte_end, tier=tier,
-                    )
-                except Exception as exc:
-                    logger.warning("Neo4j write error: %s", exc)
+                session.run(
+                    query,
+                    head=head,
+                    tail=tail,
+                    source=source_file,
+                    chunk_id=chunk_id,
+                    scope=scope,
+                    byte_start=byte_start,
+                    byte_end=byte_end,
+                    tier=tier,
+                )
 
         logger.info(
-            "  → graph: +%d relations from %s chunk %d",
-            len(triplets), source_file, chunk_id,
+            "  → graph: +%d relations from %s chunk %d scope=%s",
+            len(triplets), source_file, chunk_id, scope,
         )
+        return len(triplets)
 
     # ── resume helpers ────────────────────────────────────────────────────────
 
-    def _load_progress(self, chunks_dir: Path) -> dict[str, set[int]]:
-        """Load the per-file chunk progress map from ``.kg_progress.json``."""
-        path = chunks_dir / ".kg_progress.json"
-        if path.exists():
-            try:
-                raw: dict = json.loads(path.read_text(encoding="utf-8"))
-                return {k: set(v) for k, v in raw.items()}
-            except Exception as exc:
-                logger.warning("Could not read progress file (%s); starting fresh", exc)
-        return {}
+    @staticmethod
+    def _new_manifest() -> dict[str, Any]:
+        return {"version": _MANIFEST_VERSION, "documents": {}}
 
-    def _save_progress(self, chunks_dir: Path, progress: dict[str, set[int]]) -> None:
-        """Flush the progress map to ``.kg_progress.json``."""
-        path = chunks_dir / ".kg_progress.json"
-        serializable = {k: sorted(v) for k, v in progress.items()}
-        path.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
+    def _load_manifest(self, chunks_dir: Path) -> tuple[dict[str, Any], bool]:
+        """Load the versioned extraction manifest, invalidating legacy progress."""
+        path = chunks_dir / _MANIFEST_FILENAME
+        if not path.exists():
+            return self._new_manifest(), False
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Could not read KG manifest (%s); rebuilding sources", exc)
+            return self._new_manifest(), True
+
+        if (
+            isinstance(raw, dict)
+            and raw.get("version") == _MANIFEST_VERSION
+            and isinstance(raw.get("documents"), dict)
+        ):
+            return raw, False
+
+        logger.warning(
+            "event=kg_legacy_manifest_invalidated path=%s", path.name
+        )
+        return self._new_manifest(), True
+
+    def _save_manifest(self, chunks_dir: Path, manifest: dict[str, Any]) -> None:
+        """Persist the manifest atomically so interrupted runs remain resumable."""
+        path = chunks_dir / _MANIFEST_FILENAME
+        pending_path = chunks_dir / f"{_MANIFEST_FILENAME}.pending"
+        try:
+            pending_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+            )
+            pending_path.replace(path)
+        except OSError as exc:
+            logger.error("Could not persist KG manifest: %s", exc, exc_info=True)
+            try:
+                pending_path.unlink(missing_ok=True)
+            except OSError:
+                logger.debug("Could not clean up pending KG manifest", exc_info=True)
+            raise
+
+    def _document_fingerprint(self, data: Any) -> str:
+        """Fingerprint chunk content and all settings that affect extraction output."""
+        chunks = data.get("chunks", []) if isinstance(data, dict) else data
+        fingerprint_input = {
+            "chunks": chunks,
+            "model": self.model,
+            "chat_url": self.chat_url,
+            "fallback_model": self.fallback_model,
+            "fallback_chat_url": self.fallback_chat_url,
+            "max_tokens": self.max_tokens,
+            "max_text_chars": self.max_chars,
+            "min_chunk_chars": self.min_chars,
+            "relation_verbs": self._relation_verbs_str,
+            "few_shot_examples": self._few_shot_text,
+        }
+        serialized = json.dumps(
+            fingerprint_input, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def purge_source(self, source_file: str, scope: str = "literature") -> int:
+        """Delete only relationships belonging to a source scope, never entities."""
+        query = """
+        MATCH ()-[r]->()
+        WHERE r.source = $source AND (r.scope = $scope OR r.scope IS NULL)
+        DELETE r
+        RETURN count(r) AS deleted
+        """
+        with self._driver.session() as session:
+            result = session.run(query, source=source_file, scope=scope)
+            record = result.single()
+        deleted = int(record["deleted"]) if record and "deleted" in record else 0
+        logger.info(
+            "event=kg_source_purged source=%s scope=%s relationships=%d",
+            source_file,
+            scope,
+            deleted,
+        )
+        return deleted
 
     # ── pipeline entry-point ──────────────────────────────────────────────────
 
-    def process_chunks_dir(self, chunks_dir: Path) -> int:
+    def process_chunks_file(
+        self, file_path: Path, scope: str = "literature", force: bool = False
+    ) -> int:
         """
-        Process all ``*_chunks.json`` files under *chunks_dir*.
+        Process one ``*_chunks.json`` file and return relationships written.
 
-        Skips chunks already recorded in ``.kg_progress.json`` so interrupted
-        runs can resume from where they left off without reprocessing.
-
-        Returns:
-            Total number of triplets written across all chunks.
+        A source is rebuilt after a manifest version/fingerprint mismatch or
+        ``force=True``. Only its own relationships are purged before rebuilding.
+        Failed extraction attempts remain unrecorded and are retried next run.
+        A successful empty response is explicitly recorded as a zero-triplet
+        chunk rather than being confused with an extraction failure.
         """
+        chunks_dir = file_path.parent
+        try:
+            data = json.loads(file_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.error("Could not read chunk file %s: %s", file_path, exc, exc_info=True)
+            return 0
+
+        chunks: list[dict[str, Any]] = (
+            data.get("chunks", []) if isinstance(data, dict) else data
+        )
+        if not isinstance(chunks, list):
+            logger.error("Chunk file %s has a non-list chunks payload", file_path)
+            return 0
+
+        manifest, legacy_manifest = self._load_manifest(chunks_dir)
+        documents: dict[str, Any] = manifest["documents"]
+        file_key = file_path.stem
+        fingerprint = self._document_fingerprint(data)
+        existing = documents.get(file_key)
+        stale = (
+            legacy_manifest
+            or force
+            or not isinstance(existing, dict)
+            or existing.get("fingerprint") != fingerprint
+            or existing.get("scope") != scope
+        )
+        if stale:
+            reason = (
+                "legacy" if legacy_manifest else "force" if force else "fingerprint"
+            )
+            logger.info(
+                "event=kg_source_rebuild source=%s scope=%s reason=%s",
+                file_key,
+                scope,
+                reason,
+            )
+            self.purge_source(file_key, scope)
+            document: dict[str, Any] = {
+                "fingerprint": fingerprint,
+                "scope": scope,
+                "processed_chunks": [],
+                "zero_triplet_chunks": [],
+                "triplet_count": 0,
+                "complete": False,
+            }
+            documents[file_key] = document
+            self._save_manifest(chunks_dir, manifest)
+        else:
+            document = existing
+
+        processed_chunks = {
+            int(index)
+            for index in document.get("processed_chunks", [])
+            if isinstance(index, int)
+        }
+        zero_triplet_chunks = {
+            int(index)
+            for index in document.get("zero_triplet_chunks", [])
+            if isinstance(index, int)
+        }
+        eligible_chunks = {
+            index
+            for index, chunk in enumerate(chunks)
+            if isinstance(chunk, dict)
+            and len(str(chunk.get("content", ""))) >= self.min_chars
+            and not (self.filter_boilerplate and chunk.get("is_boilerplate", False))
+        }
+        total_triplets = 0
+
+        for index in sorted(eligible_chunks):
+            if index in processed_chunks:
+                continue
+            chunk = chunks[index]
+            content = str(chunk.get("content", ""))
+            logger.info("  Chunk %d/%d — extracting triplets…", index + 1, len(chunks))
+            try:
+                triplets = self.extract_triplets(content)
+                if triplets is None:
+                    logger.warning(
+                        "event=kg_chunk_unprocessed source=%s chunk=%d reason=extractor_unavailable",
+                        file_key,
+                        index,
+                    )
+                    continue
+                written = self.write_triplets(
+                    triplets,
+                    file_key,
+                    index,
+                    byte_start=chunk.get("char_start"),
+                    byte_end=chunk.get("char_end"),
+                    scope=scope,
+                )
+            except KeyboardInterrupt:
+                logger.info("Interrupted at chunk %d/%d. Re-run to resume.", index + 1, len(chunks))
+                raise
+            except Exception as exc:
+                logger.error(
+                    "event=kg_chunk_unprocessed source=%s chunk=%d reason=%s",
+                    file_key,
+                    index,
+                    type(exc).__name__,
+                    exc_info=True,
+                )
+                continue
+
+            processed_chunks.add(index)
+            if written == 0:
+                zero_triplet_chunks.add(index)
+            else:
+                zero_triplet_chunks.discard(index)
+            total_triplets += written
+            document["processed_chunks"] = sorted(processed_chunks)
+            document["zero_triplet_chunks"] = sorted(zero_triplet_chunks)
+            document["triplet_count"] = int(document.get("triplet_count", 0)) + written
+            document["complete"] = processed_chunks >= eligible_chunks
+            self._save_manifest(chunks_dir, manifest)
+
+        document["processed_chunks"] = sorted(processed_chunks)
+        document["zero_triplet_chunks"] = sorted(zero_triplet_chunks)
+        document["complete"] = processed_chunks >= eligible_chunks
+        self._save_manifest(chunks_dir, manifest)
+        logger.info(
+            "event=kg_source_complete source=%s scope=%s complete=%s triplets_written=%d "
+            "zero_triplet_chunks=%d",
+            file_key,
+            scope,
+            document["complete"],
+            total_triplets,
+            len(zero_triplet_chunks),
+        )
+        return total_triplets
+
+    def process_chunks_dir(
+        self, chunks_dir: Path, scope: str = "literature", force: bool = False
+    ) -> int:
+        """Process all ``*_chunks.json`` files and return relationships written."""
         chunk_files = sorted(chunks_dir.glob("*_chunks.json"))
         if not chunk_files:
             logger.warning("No *_chunks.json files found in %s", chunks_dir)
             return 0
 
-        logger.info("GraphCreator: found %d chunk file(s)", len(chunk_files))
-        progress = self._load_progress(chunks_dir)
-        total_skipped = sum(len(v) for v in progress.values())
-        if total_skipped:
-            logger.info(
-                "GraphCreator: resuming — %d chunk(s) already processed", total_skipped
-            )
+        logger.info(
+            "GraphCreator: found %d chunk file(s) scope=%s force=%s",
+            len(chunk_files),
+            scope,
+            force,
+        )
         total_triplets = 0
-
         for file_path in chunk_files:
             logger.info("Processing: %s", file_path.name)
-            with open(file_path, encoding="utf-8") as fh:
-                data = json.load(fh)
-
-            chunks: list[dict] = (
-                data.get("chunks", []) if isinstance(data, dict) else data
+            total_triplets += self.process_chunks_file(
+                file_path, scope=scope, force=force
             )
-            file_key = file_path.stem
-            processed_set: set[int] = progress.get(file_key, set())
-
-            for i, chunk in enumerate(chunks):
-                # Resume: skip chunks already successfully written on a previous run.
-                if i in processed_set:
-                    logger.debug(
-                        "  Chunk %d/%d — skipping (already processed)", i + 1, len(chunks)
-                    )
-                    continue
-
-                content: str = chunk.get("content", "")
-                if len(content) < self.min_chars:
-                    continue
-                if self.filter_boilerplate and chunk.get("is_boilerplate", False):
-                    logger.debug("  Chunk %d/%d — skipping boilerplate", i + 1, len(chunks))
-                    continue
-
-                byte_start: int | None = chunk.get("char_start")
-                byte_end: int | None = chunk.get("char_end")
-
-                try:
-                    logger.info(
-                        "  Chunk %d/%d — extracting triplets…", i + 1, len(chunks)
-                    )
-                    triplets = self.extract_triplets(content)
-
-                    # None → LLM failed on all retries; leave chunk unrecorded
-                    # so it is retried on the next run.
-                    if triplets is None:
-                        logger.warning(
-                            "  Chunk %d/%d — LLM failed, skipping progress mark",
-                            i + 1, len(chunks),
-                        )
-                        continue
-
-                    self.write_triplets(
-                        triplets, file_key, i,
-                        byte_start=byte_start, byte_end=byte_end,
-                    )
-                    total_triplets += len(triplets)
-
-                    # Mark chunk as done and persist immediately.
-                    processed_set.add(i)
-                    progress[file_key] = processed_set
-                    self._save_progress(chunks_dir, progress)
-
-                except KeyboardInterrupt:
-                    logger.info(
-                        "Interrupted at chunk %d/%d. Re-run to resume.",
-                        i + 1, len(chunks),
-                    )
-                    raise
-                except Exception as exc:
-                    logger.error("Error on chunk %d: %s", i + 1, exc, exc_info=True)
 
         logger.info(
             "GraphCreator: complete — %d total triplets written", total_triplets

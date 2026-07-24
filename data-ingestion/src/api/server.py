@@ -195,10 +195,36 @@ def _run_pipeline(pdf_path: Path, slug: str, queue: asyncio.Queue, loop: asyncio
 
         # ── Stage 5: Vectorize (Qdrant) ───────────────────────────────────────
         emit("vectorize", "running", "Embedding chunks and indexing in Qdrant…")
+        patient_collection = cfg.get("vectorization", {}).get(
+            "patient_context_collection"
+        )
+        if not isinstance(patient_collection, str) or not patient_collection.strip():
+            raise RuntimeError(
+                "vectorization.patient_context_collection must be configured"
+            )
+        research_collection = cfg.get("vectorization", {}).get("collection_name")
+        if patient_collection == research_collection:
+            raise RuntimeError(
+                "patient_context_collection must differ from collection_name"
+            )
         vectorizer = MedicalVectorizer(config=cfg)
-        vectorizer.run(str(CLEANED_DIR))
-        emit("vectorize", "done", "Vectorization complete — collection updated",
-             {"collection": vectorizer.collection_name, "slug": slug})
+        indexed_chunks = vectorizer.index_chunks_path(
+            chunks_path,
+            scope="patient_context",
+            collection_name=patient_collection,
+        )
+        emit(
+            "vectorize",
+            "done",
+            "Vectorization complete — collection updated",
+            {
+                "collection": patient_collection,
+                "count": indexed_chunks,
+                "indexed_chunks": indexed_chunks,
+                "scope": "patient_context",
+                "slug": slug,
+            },
+        )
 
         # ── Stage 6: Knowledge Graph (Neo4j) ──────────────────────────────────
         emit("kg", "running", "Extracting triplets → Neo4j knowledge graph…")
@@ -206,7 +232,9 @@ def _run_pipeline(pdf_path: Path, slug: str, queue: asyncio.Queue, loop: asyncio
             from scripts.build_knowledge_graph import KnowledgeGraphBuilder
             builder = KnowledgeGraphBuilder(cfg)
             try:
-                total_triplets = builder.run(CHUNKS_DIR)
+                total_triplets = builder.process_chunks_file(
+                    chunks_path, scope="patient_context"
+                )
             finally:
                 builder.close()
             emit("kg", "done", f"Knowledge graph built — {total_triplets} triplet(s) written",
