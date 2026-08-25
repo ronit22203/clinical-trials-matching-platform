@@ -306,10 +306,15 @@ export function fetchSubgraph(
  * Returns raw Response so caller can consume the stream body.
  * The X-Slug response header contains the document slug for subsequent artifact fetches.
  */
-export function startIngestStream(file: File): Promise<Response> {
+export function startIngestStream(file: File, signal?: AbortSignal): Promise<Response> {
   const form = new FormData();
   form.append("file", file);
-  return fetch(`${INGEST_BASE}/api/ingest`, { method: "POST", body: form, headers: authHeaders() });
+  return fetch(`${INGEST_BASE}/api/ingest`, {
+    method: "POST",
+    body: form,
+    headers: authHeaders(),
+    signal,
+  });
 }
 
 /** GET /api/ingest/artifacts/chunks/{slug} — first 10 sample chunks. */

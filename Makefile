@@ -80,7 +80,7 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 
 .PHONY: help \
 	bootstrap validate up down serve fetch ingest \
-	status benchmark-sepsis \
+	status metrics benchmark-sepsis \
 	benchmark-all benchmark-retrieval benchmark-extraction benchmark-inference benchmark-reasoning benchmark-report \
 	deterministic-run _det-ingest-timed _det-graph-timed _det-finalize \
 	clean clean-all clean-artifacts clean-ocr clean-md clean-chunks clean-vectors clean-graph clean-hard \
@@ -122,6 +122,9 @@ status: ## Show running containers and data artifact counts
 	@curl -s http://localhost:1234/v1/models 2>/dev/null | python3 -c \
 		"import sys, json; m=json.load(sys.stdin); [print('  ' + x['id']) for x in m.get('data',[])]" \
 		|| printf "  $(YELLOW)LM Studio not running$(NC)\n"
+
+metrics: ## Dump every live metric to the CLI (services, artifacts, Qdrant, Neo4j, inference, latest bench)
+	@python3 scripts/dev_metrics.py
 
 bootstrap: ## Bootstrap Python and Node dependencies
 	@./scripts/bootstrap.sh

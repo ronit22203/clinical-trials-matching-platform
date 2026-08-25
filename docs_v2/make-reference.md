@@ -10,6 +10,7 @@ All make targets are defined in the repository root `Makefile`. Module-level tas
 |--------|-------------|
 | `make help` | List all available targets |
 | `make status` | Show Docker container states and artifact counts |
+| `make metrics` | Dump every live metric to the CLI (services, Qdrant, Neo4j, inference, latest bench) |
 | `make validate` | Check `.env`, LM Studio, Qdrant, and Neo4j connectivity |
 | `make bootstrap` | Create Python venvs and install all module dependencies |
 | `make up` | Start shared Docker infrastructure (Neo4j, Qdrant) |

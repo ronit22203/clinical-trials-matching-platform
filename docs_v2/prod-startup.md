@@ -230,9 +230,14 @@ make inference-serve-fg   # Ctrl-C to stop (Option C only)
 ### 2.3 Verify everything is healthy
 
 ```bash
-make inference-status     # checks SGLang :30000 health + GPU utilisation
-make status               # container/artifact counts
+make metrics              # dump every live metric to the CLI (dev)
+make inference-status     # SGLang :30000 health + GPU utilisation only
+make status               # container/artifact counts only
 ```
+
+`make metrics` prints service liveness, GPU, artifact counts, Qdrant collection stats,
+Neo4j node/relationship breakdowns, loaded inference models, and every key from the
+latest `benchmarking/results/` run (if any). JSON form: `python3 scripts/dev_metrics.py --json`.
 
 Check Qdrant and Neo4j manually:
 

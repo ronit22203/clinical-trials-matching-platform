@@ -19,7 +19,13 @@ import {
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
-import { fetchChunks, fetchMarkdownArtifact, fetchCleanArtifact, getOcrVizUrl } from "../lib/api";
+import {
+  fetchChunks,
+  fetchMarkdownArtifact,
+  fetchCleanArtifact,
+  getOcrVizUrl,
+  startIngestStream,
+} from "../lib/api";
 import type { ActiveDocumentContext } from "../lib/api";
 import { adaptChunk } from "../lib/adapters";
 import type { UIChunk } from "../lib/adapters";
@@ -469,11 +475,7 @@ export default function IngestionPane({
 
     let response: Response;
     try {
-      response = await fetch(`/api/ingest`, {
-        method: "POST",
-        body: (() => { const f = new FormData(); f.append("file", selectedFile); return f; })(),
-        signal: abortCtrl.signal,
-      });
+      response = await startIngestStream(selectedFile, abortCtrl.signal);
     } catch (err) {
       const msg = abortCtrl.signal.aborted
         ? "Connection timed out — models may still be loading, try again in ~30 s"
