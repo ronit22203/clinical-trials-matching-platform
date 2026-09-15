@@ -124,6 +124,22 @@ class AgentConfig(BaseModel):
 # Loader
 # ---------------------------------------------------------------------------
 
+def _parse_env_value(value: str) -> str:
+    """Parse a .env value: keep quoted strings intact, drop unquoted inline comments."""
+    value = value.strip()
+    if not value:
+        return ""
+    if value[0] in {"'", '"'}:
+        quote = value[0]
+        end = value.find(quote, 1)
+        if end != -1:
+            return value[1:end]
+        return value.strip(quote)
+    if " #" in value:
+        value = value.split(" #", 1)[0]
+    return value.strip()
+
+
 def _load_dotenv() -> None:
     env_file = _REPO_ROOT / ".env.local"
     if not env_file.exists():
@@ -135,7 +151,7 @@ def _load_dotenv() -> None:
                 continue
             key, _, value = line.partition("=")
             key = key.strip()
-            value = value.strip().strip('"').strip("'")
+            value = _parse_env_value(value)
             if key and key not in os.environ:
                 os.environ[key] = value
 

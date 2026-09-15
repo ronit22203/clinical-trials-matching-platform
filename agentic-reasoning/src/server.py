@@ -185,13 +185,14 @@ async def login(form: OAuth2PasswordRequestForm = Depends()) -> JSONResponse:
     expected_user = os.environ.get("AUTH_USERNAME", "").strip()
     expected_hash = os.environ.get("AUTH_PASSWORD_HASH", "").strip()
 
-    if not expected_user or not expected_hash:
+    if not expected_user or not expected_hash.startswith("$2"):
         logger.error("AUTH_USERNAME or AUTH_PASSWORD_HASH not configured")
         raise HTTPException(
             status_code=503,
             detail={
                 "code": "auth_not_configured",
-                "message": "Authentication is not configured on this server.",
+                "message": "Authentication is not configured on this server. "
+                "Set AUTH_PASSWORD_HASH (bcrypt) and AUTH_JWT_SECRET in .env.local.",
                 "retryable": False,
             },
         )

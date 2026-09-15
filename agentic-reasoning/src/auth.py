@@ -40,7 +40,11 @@ def _get_secret() -> str:
 
 def verify_password(plain: str, hashed: str) -> bool:
     """Return True if *plain* matches the stored bcrypt *hashed* password."""
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+    try:
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except ValueError:
+        logger.error("AUTH_PASSWORD_HASH is not a valid bcrypt hash")
+        return False
 
 
 def create_access_token(sub: str) -> str:

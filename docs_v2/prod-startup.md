@@ -82,6 +82,25 @@ QDRANT_URL=http://localhost:6333
 SGLANG_BASE_URL=http://localhost:30000/v1
 ```
 
+Then generate login credentials (do **not** use system `python` — bcrypt lives in the reasoning venv):
+
+```bash
+make auth-setup PASSWORD=admin
+# or:
+./agentic-reasoning/.venv/bin/python scripts/hash_password.py admin
+./agentic-reasoning/.venv/bin/python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Paste into `.env.local` with the bcrypt hash **single-quoted** (bash would otherwise expand `$2`):
+
+```bash
+AUTH_USERNAME=admin
+AUTH_PASSWORD_HASH='$2b$12$...'
+AUTH_JWT_SECRET=<64-char hex from the command above>
+```
+
+Restart `make dev` after editing `.env.local` — uvicorn does not reload env files.
+
 > **Note:** `.env.local` is gitignored. Never commit credentials.
 
 ### 0.4 Install module dependencies

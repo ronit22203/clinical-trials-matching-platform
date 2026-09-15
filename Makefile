@@ -84,7 +84,7 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	benchmark-all benchmark-retrieval benchmark-extraction benchmark-inference benchmark-reasoning benchmark-report \
 	deterministic-run _det-ingest-timed _det-graph-timed _det-finalize \
 	clean clean-all clean-artifacts clean-ocr clean-md clean-chunks clean-vectors clean-graph clean-hard \
-	dev ollama-ready \
+	dev ollama-ready auth-setup \
 	inference-install inference-serve inference-serve-fg inference-stop \
 	inference-status inference-benchmark inference-benchmark-all \
 	inference-docker-build inference-docker-push inference-docker-run inference-docker-stop \
@@ -176,6 +176,13 @@ down: ## Stop Neo4j + Qdrant (Docker if available, else shell/stop_services.sh)
 
 serve: ## Start the reasoning agent in interactive CLI mode
 	@$(MAKE) --no-print-directory reasoning-run
+
+auth-setup: ## Print AUTH_PASSWORD_HASH + AUTH_JWT_SECRET (PASSWORD=admin)
+	@printf "$(CYAN)AUTH_PASSWORD_HASH (single-quote this in .env.local):$(NC)\n"
+	@$(REASONING_DIR)/.venv/bin/python scripts/hash_password.py "$(or $(PASSWORD),admin)"
+	@printf "$(CYAN)AUTH_JWT_SECRET:$(NC)\n"
+	@$(REASONING_DIR)/.venv/bin/python -c "import secrets; print(secrets.token_hex(32))"
+	@printf "$(YELLOW)Paste both into .env.local, then restart: make dev$(NC)\n"
 
 dev-kill: ## Kill any stale processes on :8000, :8002, :5173
 	@# macOS fuser does not support Linux's PORT/tcp syntax.
