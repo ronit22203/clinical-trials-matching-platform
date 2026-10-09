@@ -1,207 +1,251 @@
-import os
-import sys
+"""Surya v2 block-level OCR.
+
+Recognition goes through SuryaInferenceManager, which spawns llama.cpp on
+Apple Silicon or vLLM on NVIDIA. Pages are stored as layout blocks. Polygons
+are not written into the OCR JSON.
+"""
+
+from __future__ import annotations
+
 import argparse
 import json
+import os
+import sys
 from pathlib import Path
+
+import pypdfium2 as pdfium
 from PIL import ImageDraw
-import pypdfium2 as pdfium # Crucial for converting PDF pages to images
 
 # Add project root to path so imports work from any directory
 project_root = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(project_root))
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
-# --- SURYA IMPORTS ---
-from surya.models import load_predictors
+# Surya's settings object reads SURYA_INFERENCE_BACKEND as "llamacpp", not "llama.cpp".
+_BACKEND_ENV = {
+    "llama.cpp": "llamacpp",
+    "llamacpp": "llamacpp",
+    "vllm": "vllm",
+}
 
-# --- CONFIGURATION CLASS ---
+_SKIPPED_OUTLINE = "orange"
+
+
 class Config:
-    """
-    Centralized configuration for the OCR pipeline.
-    """
-    # Languages: Medical docs are often English, but you can add others.
-    LANGS = ["en"]
+    """Defaults used by the CLI. The pipeline passes config/app.yaml instead."""
 
-    # Device: On macOS, 'mps' uses the GPU (Apple Silicon).
-    # If you get errors, switch this to 'cpu'.
-    DEVICE = "mps" 
-
-    # Batch Sizes:
-    # Medical PDFs are dense. 
-    # DET_BATCH: Layout analysis (SegFormer)
-    # REC_BATCH: Text reading (Donut)
-    DET_BATCH_SIZE = 2
-    REC_BATCH_SIZE = 16
-    
-    # Rendering Scale: 2 = 144 DPI (Good), 3 = 216 DPI (Better for small text)
+    # Torch device for any detection weights the manager still loads.
+    # Recognition itself is the inference backend, not in-process MPS.
+    DEVICE = "mps"
+    INFERENCE_BACKEND = "auto"
     IMAGE_SCALE = 2
+    CONFIDENCE_THRESHOLD = 0.80
 
-    # Paths
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    RAW_DIR = os.path.join(BASE_DIR, "data", "raw")
-    PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 
-# --- UTILITIES ---
-def initialize_models(device=None):
-    """Loads all predictors into memory ONCE."""
+def apply_runtime_env(device: str | None, inference_backend: str | None) -> str:
+    """Set process env before Surya constructs its settings object.
+
+    ``auto`` leaves backend selection to Surya (vLLM when an NVIDIA GPU is
+    present, llama.cpp otherwise). Any other value is written to
+    ``SURYA_INFERENCE_BACKEND``. Keep-alive is always on so a warm API
+    process does not tear the server down between PDFs.
+    """
+    backend = (inference_backend or "auto").strip().lower()
+    os.environ["SURYA_INFERENCE_KEEP_ALIVE"] = "1"
+    mapped = None
+    if backend != "auto":
+        mapped = _BACKEND_ENV.get(backend)
+        if mapped is None:
+            raise ValueError(
+                f"Unknown inference_backend {inference_backend!r}. "
+                "Expected 'auto', 'llama.cpp', or 'vllm'."
+            )
+        os.environ["SURYA_INFERENCE_BACKEND"] = mapped
+    if device:
+        os.environ["TORCH_DEVICE"] = device
+    _patch_loaded_settings(device, mapped)
+    return backend
+
+
+def _patch_loaded_settings(device: str | None, backend: str | None) -> None:
+    """Update Surya's singleton if it was imported before the env was set."""
+    mod = sys.modules.get("surya.settings")
+    if mod is None:
+        return
+    settings = mod.settings
+    settings.SURYA_INFERENCE_KEEP_ALIVE = True
+    if backend is not None:
+        settings.SURYA_INFERENCE_BACKEND = backend
+    if device:
+        settings.TORCH_DEVICE = device
+
+
+def initialize_models(device: str | None = None, inference_backend: str | None = None) -> dict:
+    """Load one long-lived Surya v2 manager and recognition predictor."""
     if device is None:
         device = Config.DEVICE
-    print(f"Loading models on device: {device}...")
-    
-    predictors = load_predictors(device=device)
-    
-    print("Models loaded successfully.")
-    return predictors
+    if inference_backend is None:
+        inference_backend = Config.INFERENCE_BACKEND
+    apply_runtime_env(device, inference_backend)
+    from surya.inference import SuryaInferenceManager
+    from surya.recognition import RecognitionPredictor
 
-def load_pdf_images(pdf_path):
-    """
-    Converts a PDF file into a list of PIL Images.
-    Surya needs images to see the text.
-    """
+    print(
+        f"Loading Surya v2 (torch device={device}, inference_backend={inference_backend})...",
+        flush=True,
+    )
+    manager = SuryaInferenceManager()
+    predictor = RecognitionPredictor(manager)
+    print("Surya v2 ready.", flush=True)
+    return {"manager": manager, "recognition": predictor}
+
+
+def load_pdf_images(pdf_path, image_scale: float | None = None, max_pages: int | None = None):
+    """Render a PDF to PIL images. ``max_pages`` caps how many pages are rendered."""
+    scale = Config.IMAGE_SCALE if image_scale is None else image_scale
     print(f"Rendering PDF: {pdf_path}...")
     pdf = pdfium.PdfDocument(pdf_path)
     images = []
-    
-    for i, page in enumerate(pdf):
-        # Render the page to a bitmap
-        bitmap = page.render(
-            scale=Config.IMAGE_SCALE, # Higher scale = better OCR accuracy
-            rotation=0
-        )
-        # Convert to PIL Image
-        pil_image = bitmap.to_pil()
-        images.append(pil_image)
-        
+    try:
+        for i, page in enumerate(pdf):
+            if max_pages is not None and i >= int(max_pages):
+                break
+            bitmap = page.render(scale=scale, rotation=0)
+            images.append(bitmap.to_pil())
+    finally:
+        pdf.close()
     print(f"Converted {len(images)} pages to images.")
     return images
 
-def serialize_surya_results(results):
-    """
-    Converts Surya's custom result objects into a clean dictionary
-    that can be saved as JSON.
-    """
-    output = []
-    for i, result in enumerate(results):
-        page_data = {
-            "page_number": i + 1,
-            "image_bbox": result.image_bbox,
-            "text_lines": []
-        }
-        
-        for text_line in result.text_lines:
-            page_data["text_lines"].append({
-                "text": text_line.text,
-                "confidence": round(text_line.confidence, 4),
-                "bbox": text_line.bbox, # [x1, y1, x2, y2]
-                "polygon": text_line.polygon # [[x1, y1], [x2, y1], ...]
-            })
-        
-        output.append(page_data)
-    return output
 
-def visualize_results(image, page_result, save_path):
-    """
-    Debug Tool: Draws bounding boxes on the image so you can see what Surya detected.
-    Green box = High confidence (>= 0.80)
-    Red box = Low confidence (< 0.80)
+def run_ocr(images, predictor):
+    """Run block-level recognition. ``predictor`` is a RecognitionPredictor."""
+    if not images:
+        return []
+    return predictor(images)
+
+
+def _block_dict(block, index: int) -> dict:
+    """Copy one block into the on-disk schema. Polygons are dropped."""
+    if isinstance(block, dict):
+        label = block.get("label") or ""
+        html = block.get("html") or ""
+        bbox = block.get("bbox") or [0, 0, 0, 0]
+        confidence = block.get("confidence", None)
+        skipped = bool(block.get("skipped", False))
+        order = block.get("reading_order", index)
+    else:
+        label = getattr(block, "label", "") or ""
+        html = getattr(block, "html", "") or ""
+        bbox = list(block.bbox)
+        confidence = getattr(block, "confidence", None)
+        skipped = bool(getattr(block, "skipped", False))
+        order = getattr(block, "reading_order", index)
+    return {
+        "label": label,
+        "reading_order": int(order),
+        "html": html,
+        "bbox": [float(v) for v in bbox],
+        "confidence": None if confidence is None else round(float(confidence), 4),
+        "skipped": skipped,
+    }
+
+
+def _page_dict(result, page_number: int) -> dict:
+    if isinstance(result, dict):
+        blocks_in = result.get("blocks") or []
+        image_bbox = result.get("image_bbox") or []
+        number = result.get("page_number", page_number)
+    else:
+        blocks_in = result.blocks
+        image_bbox = result.image_bbox
+        number = page_number
+    blocks = [_block_dict(block, i) for i, block in enumerate(blocks_in)]
+    blocks.sort(key=lambda block: block["reading_order"])
+    return {
+        "page_number": number,
+        "image_bbox": [float(v) for v in image_bbox],
+        "blocks": blocks,
+    }
+
+
+def serialize_surya_results(results) -> list:
+    """Convert page results into compact JSON-ready dicts, without polygons."""
+    return [_page_dict(result, i + 1) for i, result in enumerate(results)]
+
+
+def visualize_results(image, page_result, save_path, confidence_threshold: float = 0.80):
+    """Draw one box per layout block.
+
+    Green is at or above the confidence threshold (or confidence was not
+    reported). Red is below the threshold. Orange is a skipped graphical block.
     """
     draw = ImageDraw.Draw(image)
-    
-    for line in page_result.text_lines:
-        # box is [x1, y1, x2, y2]
-        box = line.bbox
-        confidence = line.confidence
-        
-        # Color code: Green for sure, Red for unsure
-        color = "green" if confidence >= 0.80 else "red"
-        
-        # Draw the rectangle
+    for block in _page_dict(page_result, 1)["blocks"]:
+        if block["skipped"]:
+            color = _SKIPPED_OUTLINE
+        elif block["confidence"] is None or block["confidence"] >= confidence_threshold:
+            color = "green"
+        else:
+            color = "red"
+        box = [round(v) for v in block["bbox"]]
+        if box[2] <= box[0] or box[3] <= box[1]:
+            continue
         draw.rectangle(box, outline=color, width=2)
-        
     image.save(save_path)
-    print(f"Saved debug image: {save_path}")
 
 
-# --- MAIN EXECUTION ---
+def save_debug_images(images, results, output_dir, stem: str, confidence_threshold: float = 0.80) -> list:
+    """Write ``{stem}_page_NNN_debug.png`` and return per-page block counts."""
+    debug_dir = Path(output_dir)
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    page_info = []
+    for i, (image, result) in enumerate(zip(images, results)):
+        page = _page_dict(result, i + 1)
+        visualize_results(
+            image.copy(),
+            page,
+            debug_dir / f"{stem}_page_{i + 1:03d}_debug.png",
+            confidence_threshold,
+        )
+        page_info.append({
+            "page": i + 1,
+            "blocks": len(page["blocks"]),
+            "skipped": sum(1 for block in page["blocks"] if block["skipped"]),
+        })
+    return page_info
+
+
 if __name__ == "__main__":
-    # 1. Parse Arguments
-    parser = argparse.ArgumentParser(description="Extract text from PDF using Surya OCR")
+    parser = argparse.ArgumentParser(description="Extract layout blocks from a PDF with Surya v2")
     parser.add_argument("input_pdf", type=str, help="Path to the input PDF file")
     args = parser.parse_args()
-    
-    # 2. Validation
+
     input_file = Path(args.input_pdf)
     if not input_file.exists():
         print(f"Error: Input file '{args.input_pdf}' does not exist.")
         sys.exit(1)
-    
-    # 3. Setup Output Directory
+
     output_dir = Path(project_root) / "tests" / "test_data"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 4. Initialize Models
-    predictors = initialize_models()
-    
-    # 5. Process PDF
+    models = initialize_models()
     try:
-        # Convert PDF -> Images
         images = load_pdf_images(str(input_file))
-        
-        # Run OCR using detection and recognition predictors
         print(f"Running OCR on {len(images)} pages...")
-        
-        detection_predictor = predictors["detection"]
-        recognition_predictor = predictors["recognition"]
-        
-        results = []
-        for i, image in enumerate(images):
-            print(f"  Processing page {i + 1}/{len(images)}...")
-            
-            # Run detection on single image
-            detection_result = detection_predictor([image])
-            
-            # Convert PolygonBox objects to bounding boxes for recognition
-            # Each bbox should be in format [[x1, y1, x2, y2], ...]
-            bboxes = []
-            for poly_box in detection_result[0].bboxes:
-                # PolygonBox has polygon attribute - get the bounding box
-                if hasattr(poly_box, 'polygon') and len(poly_box.polygon) > 0:
-                    xs = [p[0] for p in poly_box.polygon]
-                    ys = [p[1] for p in poly_box.polygon]
-                    bbox = [[min(xs), min(ys), max(xs), max(ys)]]
-                    bboxes.extend(bbox)
-            
-            # Run recognition with converted bboxes
-            if bboxes:
-                recognition_result = recognition_predictor(images=[image], bboxes=[bboxes])
-                results.append(recognition_result[0])
-        
-        # 6. Save Results
+        results = run_ocr(images, models["recognition"])
         json_output = serialize_surya_results(results)
-        
-        # 7. Save Debug Images (Visual Validation)
-        debug_dir = output_dir / "debug_viz"
-        debug_dir.mkdir(exist_ok=True)
-        
-        print("\n🔍 Generating debug visualizations...")
-        for i, (image, result) in enumerate(zip(images, results)):
-            # We pass a copy so we don't draw on the original in memory
-            visualize_results(
-                image.copy(),
-                result, 
-                debug_dir / f"page_{i+1}_debug.png"
-            )
-        
-        # Save JSON (same as before)
-        output_filename = f"{input_file.stem}_ocr.json"
-        output_path = output_dir / output_filename
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(json_output, f, indent=2, ensure_ascii=False)
-            
-        print(f"\nSuccess! JSON saved to: {output_path}")
-        print(f"Check {debug_dir} to see the visualized OCR boxes.")
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
+        debug_dir = output_dir / "debug_viz"
+        save_debug_images(images, results, debug_dir, input_file.stem, Config.CONFIDENCE_THRESHOLD)
+
+        output_path = output_dir / f"{input_file.stem}_ocr.json"
+        with open(output_path, "w", encoding="utf-8") as fh:
+            json.dump(json_output, fh, indent=2, ensure_ascii=False)
+
+        print(f"\nSuccess! JSON saved to: {output_path}")
+        print(f"Check {debug_dir} to see the visualized layout boxes.")
+    except Exception as exc:
+        print(f"An error occurred: {exc}")
         import traceback
         traceback.print_exc()

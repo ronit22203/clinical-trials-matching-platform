@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import sys
+import threading
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -89,25 +90,49 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(
 
 # ── Model warm-up cache (populated at startup, reused per request) ─────────────
 _WARM_PREDICTORS: dict | None = None
+_WARM_LOCK = threading.Lock()
+_WARM_DONE = threading.Event()
+
+
+def _load_predictors(device: str, inference_backend: str = "auto") -> dict:
+    """Load Surya v2 once. Safe to call from warmup and ingest threads."""
+    global _WARM_PREDICTORS
+    if _WARM_PREDICTORS is not None:
+        return _WARM_PREDICTORS
+    with _WARM_LOCK:
+        if _WARM_PREDICTORS is not None:
+            return _WARM_PREDICTORS
+        from src.extractors.pdf_marker_v2 import initialize_models
+
+        log.info(
+            "Loading Surya v2 (device=%s, inference_backend=%s). "
+            "The first llama.cpp or vLLM start can take several minutes…",
+            device,
+            inference_backend,
+        )
+        _WARM_PREDICTORS = initialize_models(device=device, inference_backend=inference_backend)
+        log.info("Surya v2 ready (device=%s, inference_backend=%s)", device, inference_backend)
+        return _WARM_PREDICTORS
 
 
 def _warmup_models() -> None:
-    """Pre-load Surya OCR models into _WARM_PREDICTORS at server startup.
+    """Pre-load Surya v2 into _WARM_PREDICTORS at server startup.
 
-    Runs in a thread so it doesn't block the event loop. On a cold CUDA pod
-    this takes ~60-90 s; subsequent requests reuse the cached predictors and
-    start OCR immediately.
+    Runs in a thread so it doesn't block the event loop. The inference server
+    is left running (SURYA_INFERENCE_KEEP_ALIVE) so later requests reuse it.
     """
-    global _WARM_PREDICTORS
     try:
-        from src.extractors.pdf_marker_v2 import initialize_models
-        cfg    = load_ingestion_config(_CONFIG_PATH)
-        device = cfg.get("ocr", {}).get("device", "cpu")
-        log.info("Pre-warming Surya OCR models on device=%s …", device)
-        _WARM_PREDICTORS = initialize_models(device=device)
-        log.info("Surya OCR models ready (device=%s)", device)
+        log.info("OCR warm-up started — importing torch/surya (no log until import finishes)…")
+        cfg = load_ingestion_config(_CONFIG_PATH)
+        ocr_cfg = cfg.get("ocr", {})
+        _load_predictors(
+            ocr_cfg.get("device", "cpu"),
+            ocr_cfg.get("inference_backend", "auto"),
+        )
     except Exception:
         log.exception("Model warm-up failed — models will load on first request")
+    finally:
+        _WARM_DONE.set()
 
 
 @asynccontextmanager
@@ -146,72 +171,59 @@ def _run_pipeline(pdf_path: Path, slug: str, queue: asyncio.Queue, loop: asyncio
         event: dict = {"stage": stage, "status": status, "message": message}
         if extra:
             event["extra"] = extra
+        log.info("[%s:%s] %s", stage, status, message)
         asyncio.run_coroutine_threadsafe(queue.put(event), loop)
 
     try:
+        emit("init", "running", f"Pipeline initialised for '{slug}'")
+
+        cfg     = load_ingestion_config(_CONFIG_PATH)
+        ocr_cfg = cfg.get("ocr", {})
+        device  = ocr_cfg.get("device", "mps")
+        backend = ocr_cfg.get("inference_backend", "auto")
+
+        # ── Stage 1: PDF → OCR JSON ───────────────────────────────────────────
+        if not _WARM_DONE.is_set():
+            emit("ocr", "running", f"Waiting for OCR warm-up on {device} (first model load can take several minutes)…")
+            _WARM_DONE.wait(timeout=600)
+        emit("ocr", "running", f"Loading Surya v2 on {device} ({backend})…")
+        predictors = _load_predictors(device, backend)
+
         from src.extractors.pdf_marker_v2 import (
-            initialize_models,
             load_pdf_images,
+            run_ocr,
+            save_debug_images,
             serialize_surya_results,
         )
         from src.extractors.surya_converter import SuryaToMarkdown
         from src.processors.chunker import MarkdownChunker
         from src.processors.cleaner import TextCleaner
         from src.storage.embedder import MedicalVectorizer
-        from PIL import ImageDraw
-
-        cfg     = load_ingestion_config(_CONFIG_PATH)
-        ocr_cfg = cfg.get("ocr", {})
-
-        emit("init", "running", f"Pipeline initialised for '{slug}'")
-
-        # ── Stage 1: PDF → OCR JSON ───────────────────────────────────────────
-        emit("ocr", "running", "Loading Surya OCR models…")
-        device = ocr_cfg.get("device", "mps")
-        predictors = _WARM_PREDICTORS if _WARM_PREDICTORS is not None else initialize_models(device=device)
 
         emit("ocr", "running", "Rendering PDF pages…")
-        images = load_pdf_images(str(pdf_path))
+        images = load_pdf_images(
+            str(pdf_path),
+            image_scale=ocr_cfg.get("image_scale"),
+            max_pages=ocr_cfg.get("max_pages"),
+        )
         emit("ocr", "running", f"Running OCR on {len(images)} page(s)…")
+        results = run_ocr(images, predictors["recognition"])
 
-        det_pred = predictors["detection"]
-        rec_pred = predictors["recognition"]
-        results  = []
-
-        for i, image in enumerate(images):
-            detection_result = det_pred([image])
-            bboxes = []
-            for poly_box in detection_result[0].bboxes:
-                if hasattr(poly_box, "polygon") and poly_box.polygon:
-                    xs = [p[0] for p in poly_box.polygon]
-                    ys = [p[1] for p in poly_box.polygon]
-                    bboxes.append([min(xs), min(ys), max(xs), max(ys)])
-            if bboxes:
-                rec = rec_pred(images=[image], bboxes=[bboxes])
-                results.append(rec[0])
-
-        # Serialize OCR JSON
         json_output   = serialize_surya_results(results)
         ocr_json_path = OCR_DIR / f"{slug}_ocr.json"
         ocr_json_path.parent.mkdir(parents=True, exist_ok=True)
         with open(ocr_json_path, "w", encoding="utf-8") as fh:
             json.dump(json_output, fh, indent=2, ensure_ascii=False)
 
-        # Save debug visualizations
-        viz_dir   = OCR_DIR / slug / "debug_visualizations"
-        viz_dir.mkdir(parents=True, exist_ok=True)
-        conf_thr  = ocr_cfg.get("confidence_threshold", 0.80)
-        page_info = []
-
-        for i, (image, result) in enumerate(zip(images, results)):
-            img_copy = image.copy()
-            draw     = ImageDraw.Draw(img_copy)
-            for line in result.text_lines:
-                color = "green" if line.confidence >= conf_thr else "red"
-                draw.rectangle(line.bbox, outline=color, width=2)
-            img_name = f"{slug}_page_{i + 1:03d}_debug.png"
-            img_copy.save(viz_dir / img_name)
-            page_info.append({"page": i + 1, "lines": len(result.text_lines)})
+        conf_thr = ocr_cfg.get("confidence_threshold", 0.80)
+        if ocr_cfg.get("save_debug_images", True):
+            viz_dir = OCR_DIR / slug / "debug_visualizations"
+            page_info = save_debug_images(images, results, viz_dir, slug, conf_thr)
+        else:
+            page_info = [
+                {"page": page["page_number"], "blocks": len(page["blocks"])}
+                for page in json_output
+            ]
 
         emit("ocr", "done", f"OCR complete — {len(images)} page(s), viz saved",
              {"pages": len(images), "slug": slug, "page_info": page_info})

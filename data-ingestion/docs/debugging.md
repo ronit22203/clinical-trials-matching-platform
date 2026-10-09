@@ -63,7 +63,7 @@ pdfinfo data/raw/file.pdf
 python -c "
 import json
 ocr = json.load(open('data/ocr/file_ocr.json'))
-confidences = [l['confidence'] for p in ocr for l in p['text_lines']]
+confidences = [b['confidence'] for p in ocr for b in p.get('blocks', []) if b.get('confidence') is not None]
 print(f'Avg: {sum(confidences)/len(confidences):.2f}')
 print(f'Min: {min(confidences):.2f}')
 print(f'Max: {max(confidences):.2f}')
@@ -102,8 +102,9 @@ python -c "
 import json
 ocr = json.load(open('data/ocr/file_ocr.json'))
 for i, page in enumerate(ocr, 1):
-    lines = len(page.get('text_lines', []))
-    print(f'Page {i}: {lines} text lines')
+    blocks = page.get('blocks', [])
+    skipped = sum(1 for b in blocks if b.get('skipped'))
+    print(f'Page {i}: {len(blocks)} blocks, {skipped} skipped')
 "
 
 # 2. Visually inspect debug PNG
@@ -125,32 +126,28 @@ open "data/ocr/file/debug_visualizations/file_page_XX_debug.png"
 **Symptoms**: Important section headers are not converted to markdown headers
 
 **Root Causes**:
-- Text not marked as bold in OCR
-- Header heuristics don't match document style
-- Unusual formatting or fonts
+- The block's `label` is not `SectionHeader`
+- The header was classified as page chrome (`PageHeader` / `PageFooter`) and dropped
 
 **Debug Steps**:
 ```bash
-# 1. Check OCR JSON for bold markers
+# 1. Check layout labels on the first page
 python -c "
 import json
 ocr = json.load(open('data/ocr/file_ocr.json'))
-page = ocr[0]
-for line in page['text_lines'][:10]:
-    if '<b>' in line['text']:
-        print(f'Bold: {line[\"text\"][:50]}')
+for block in ocr[0].get('blocks', [])[:10]:
+    print(block.get('reading_order'), block.get('label'), block.get('skipped'))
 "
 
 # 2. Compare OCR vs converted markdown
-echo "=== OCR Text ===" && head data/ocr/file_ocr.json | jq '.[] | .text_lines[0]'
+echo "=== OCR blocks ===" && jq '.[] | .blocks[0].label' data/ocr/file_ocr.json
 echo "=== Converted ===" && head -20 data/markdown/file_converted.md
 ```
 
 **Solutions**:
-- Increase `image_scale` to improve OCR bold detection
-- Adjust header detection heuristics in `surya_converter.py`
+- Confirm the OCR JSON label. The converter promotes `SectionHeader` only
+- Page headers and footers are omitted on purpose
 - Manually fix critical headers in markdown (Stage 3)
-- Document expected header patterns for future processing
 
 #### Issue: "Page markers missing"
 

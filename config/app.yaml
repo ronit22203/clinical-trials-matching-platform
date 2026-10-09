@@ -18,9 +18,10 @@ data_ingestion:
   ocr:
     langs:
     - en
+    # Torch device for leftover detection weights. Recognition uses inference_backend.
     device: mps
-    det_batch_size: 2
-    rec_batch_size: 16
+    # auto | llama.cpp | vllm. auto selects llama.cpp without an NVIDIA GPU, else vLLM.
+    inference_backend: auto
     image_scale: 2
     output_dir: ../data/artifacts/extract
     confidence_threshold: 0.8
@@ -79,9 +80,9 @@ data_ingestion:
     database: neo4j
   knowledge_graph:
     enabled: true
-    model: qwen2.5:7b
+    model: medgemma:4b
     chat_url: ${OLLAMA_BASE_URL}/v1/chat/completions
-    fallback_model: ${LLM_MODEL}
+    fallback_model: medgemma:4b
     fallback_chat_url: ${LM_STUDIO_BASE_URL}/chat/completions
     health_timeout_seconds: 2
     max_retries: 2
@@ -814,8 +815,8 @@ data_acquisition:
         default: true
 agentic_reasoning:
   agent:
-    model: ollama/qwen2.5:7b
-    fallback_model: lmstudio/${LLM_MODEL}
+    model: ollama/medgemma:4b
+    fallback_model: ollama/medgemma:4b
     health_check_timeout_seconds: 2
     context_window_tokens: 4096
     prompt_safety_margin_tokens: 256

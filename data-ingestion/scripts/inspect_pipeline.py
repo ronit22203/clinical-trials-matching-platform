@@ -5,8 +5,13 @@ Verifies the pipeline works end-to-end and provides traceability inspection
 """
 
 import json
+import re
 from pathlib import Path
 from datetime import datetime
+
+def _html_preview(html: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", html or "")
+    return " ".join(text.split())
 
 PROJECT_ROOT = Path(__file__).parent.parent
 REPO_ROOT = PROJECT_ROOT.parent
@@ -47,17 +52,19 @@ def inspect_stage_1():
             with open(json_file) as f:
                 data = json.load(f)
             
-            total_lines = sum(len(page.get('text_lines', [])) for page in data)
+            total_blocks = sum(len(page.get('blocks', [])) for page in data)
             print(f"Pages: {len(data)}")
-            print(f"Total text lines: {total_lines}")
+            print(f"Total layout blocks: {total_blocks}")
             
-            # Sample first few lines from first page
-            if data and data[0].get('text_lines'):
-                print("Sample (first 2 lines):")
-                for line in data[0]['text_lines'][:2]:
-                    text_preview = line['text'][:50].replace('\n', ' ')
-                    conf = line.get('confidence', 0)
-                    print(f"• {text_preview}... (confidence: {conf:.2f})")
+            if data and data[0].get('blocks'):
+                print("Sample (first 2 blocks):")
+                for block in data[0]['blocks'][:2]:
+                    preview = _html_preview(block.get('html', ''))[:50]
+                    label = block.get('label', '')
+                    conf = block.get('confidence')
+                    conf_text = f"{conf:.2f}" if isinstance(conf, (int, float)) else "n/a"
+                    skipped = " skipped" if block.get('skipped') else ""
+                    print(f"• [{label}] {preview}... (confidence: {conf_text}{skipped})")
         
         except Exception as e:
             print(f"Error reading: {e}")

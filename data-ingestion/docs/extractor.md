@@ -2,13 +2,9 @@
 
 ## Overview
 
-The extraction stage transforms PDF documents into structured OCR output. The pipeline uses **Surya OCR** for robust text detection and includes **debug visualizations** for quality assurance.
+The extraction stage transforms PDF documents into structured OCR output. The pipeline uses **Surya v2** block layout and writes **debug visualizations** for quality assurance.
 
-### Why Two Extractors?
-
-The codebase contains two extraction approaches:
-- **pdf_marker_v2.py** - Surya OCR + Pix2Struct (current production path)
-- **base.py** - Base extractor interface
+Recognition is not in-process MPS. `SuryaInferenceManager` spawns llama.cpp (`brew install llama.cpp` on Apple Silicon) or vLLM (NVIDIA). Set `data_ingestion.ocr.inference_backend` to `auto`, `llama.cpp`, or `vllm`.
 
 ## PDF Marker V2 (Current Production)
 
@@ -20,23 +16,23 @@ Located in `src/extractors/pdf_marker_v2.py`
 PDF File
     ↓
 [Load PDF & Convert to Images]
-    - Uses pypdfium2 for robust PDF rendering
-    - Renders at 2x resolution for better OCR accuracy
+    - Uses pypdfium2
+    - Renders at image_scale (default 2)
     ↓
-[Run Surya OCR]
-    - Scene text detection (vision transformer)
-    - Optical character recognition
-    - Outputs: text_lines with bbox, confidence, polygons
+[Surya v2 RecognitionPredictor]
+    - One call returns layout blocks in reading order
+    - Tables are HTML; pictures and figure grids are skipped
     ↓
 [Serialize to JSON]
-    - Clean dictionary format
-    - Preserves bounding boxes for layout reconstruction
+    - label, reading_order, html, bbox, confidence, skipped
+    - Polygons are not stored
     ↓
 [Optional: Visualize Results]
-    - Draws bboxes on page images
-    - Saves debug PNGs for QA
+    - Green: confident block
+    - Red: below confidence_threshold
+    - Orange: skipped graphical block
     ↓
-OCR JSON (data/ocr/{filename}_ocr.json)
+OCR JSON ({ocr_dir}/{filename}_ocr.json)
 ```
 
 ### Key Components
@@ -45,170 +41,96 @@ OCR JSON (data/ocr/{filename}_ocr.json)
 ```python
 from src.extractors.pdf_marker_v2 import initialize_models
 
-# Load ML models (one-time cost, ~30 seconds)
-predictors = initialize_models(device="cpu")  # or "cuda", "mps"
+models = initialize_models(device="cpu", inference_backend="auto")
+predictor = models["recognition"]
 ```
 
-**What it loads**:
-- Surya detection model (scene text detection)
-- Surya recognition model (character OCR)
-- Pix2Struct model (table detection - optional)
-- ~2-3GB memory footprint
+`initialize_models` keeps the inference server alive for the process (`SURYA_INFERENCE_KEEP_ALIVE`).
 
 #### 2. Load PDF Images
 ```python
 from src.extractors.pdf_marker_v2 import load_pdf_images
 
-images = load_pdf_images("data/raw/paper.pdf")
-# Returns: [PIL.Image, PIL.Image, ...]
+images = load_pdf_images("data/raw/paper.pdf", image_scale=2, max_pages=None)
 ```
 
-**Parameters**:
-- `IMAGE_SCALE`: Rendering resolution multiplier (default: 2.0)
-  - 1.0 = 72 DPI (fast, lower quality)
-  - 2.0 = 144 DPI (balanced)
-  - 3.0+ = 216+ DPI (slow, highest quality)
+`image_scale` 2 is 144 DPI. `max_pages` stops rendering after that many pages.
 
-#### 3. Run OCR
+#### 3. Run OCR and serialize
 ```python
-results = run_ocr_on_images(images, predictors)
-# Returns: List[Surya.DetectedText result objects]
-```
+from src.extractors.pdf_marker_v2 import run_ocr, serialize_surya_results
 
-**Output per page**:
-- `text_lines`: List of detected text regions
-- `bbox`: [x1, y1, x2, y2] in pixel coordinates
-- `confidence`: 0.0-1.0 OCR confidence
-- `polygon`: [corner_points] for rotated text
-
-#### 4. Serialize Results
-```python
+results = run_ocr(images, predictor)
 ocr_json = serialize_surya_results(results)
-# Converts Surya objects to clean JSON
 ```
 
 ### Output Structure
-
-**File**: `data/ocr/{filename}_ocr.json`
 
 ```json
 [
   {
     "page_number": 1,
-    "image_bbox": [0, 0, 612, 792],
-    "text_lines": [
+    "image_bbox": [0, 0, 1224, 1584],
+    "blocks": [
       {
-        "text": "<b>MEDICAL REPORT</b>",
-        "confidence": 0.95,
+        "label": "SectionHeader",
+        "reading_order": 0,
+        "html": "Methods",
         "bbox": [50, 50, 200, 75],
-        "polygon": [[50, 50], [200, 50], [200, 75], [50, 75]]
+        "confidence": 0.95,
+        "skipped": false
       },
       {
-        "text": "Patient Name: John Doe",
-        "confidence": 0.92,
-        "bbox": [50, 85, 300, 105],
-        "polygon": [[50, 85], [300, 85], [300, 105], [50, 105]]
+        "label": "Table",
+        "reading_order": 1,
+        "html": "<table><tr><td>Low</td><td>High</td></tr></table>",
+        "bbox": [50, 90, 400, 200],
+        "confidence": 0.91,
+        "skipped": false
+      },
+      {
+        "label": "Picture",
+        "reading_order": 2,
+        "html": "",
+        "bbox": [50, 220, 400, 400],
+        "confidence": null,
+        "skipped": true
       }
     ]
-  },
-  {
-    "page_number": 2,
-    "image_bbox": [0, 0, 612, 792],
-    "text_lines": [...]
   }
 ]
 ```
 
+`bbox` is `[x0, y0, x1, y1]` in pixels of the rendered page. `skipped: true` means the block was a graphical region and was not OCR'd. Do not fill those regions in by guessing symbols.
+
 ### Debug Visualizations
 
-**Location**: `data/ocr/{filename}/debug_visualizations/`
+**Location**: `{ocr_dir}/{filename}/debug_visualizations/`
 
-Files generated:
-- `{filename}_page_001_debug.png`
-- `{filename}_page_002_debug.png`
-- etc.
-
-Each PNG shows:
-- Original page image
-- Colored bounding boxes around detected text
-- Confidence scores displayed
-- Layout structure visible
-
-**Use Case**: Verify OCR quality before processing further.
+Files: `{filename}_page_001_debug.png`, and one PNG per rendered page.
 
 ### Configuration
 
-From `config/settings.yaml`:
+From `config/app.yaml` (`data_ingestion.ocr`):
 
 ```yaml
 ocr:
-  enable_surya: true              # Use Surya OCR (vs other engines)
-  device: "mps"                   # "cpu", "cuda", "mps" (Apple Silicon)
-  image_scale: 2.0                # PDF rendering resolution multiplier
-  enable_table_detection: true    # Detect and preserve tables
-  confidence_threshold: 0.5       # Minimum confidence to include text
-  save_debug_images: true         # Generate debug visualizations
+  device: mps                  # torch device for leftover detection weights
+  inference_backend: auto      # auto | llama.cpp | vllm
+  image_scale: 2
+  confidence_threshold: 0.8    # text blocks below this are omitted from Markdown
+  save_debug_images: true
+  max_pages: null
 ```
 
-### Performance Characteristics
+### Runtime
 
-| Metric | Value | Notes |
-|--------|-------|-------|
-| Speed | 20-30 sec / 50 pages | Single-threaded, CPU |
-| RAM | 2-4 GB | Per process |
-| GPU Support | Yes (CUDA, MPS) | ~5x faster |
-| Text Accuracy | 95-99% | Depends on PDF quality |
-| Layout Preservation | Very Good | Maintains spatial structure |
+| Host | Backend |
+|------|---------|
+| Apple Silicon / CPU | llama.cpp (`llama-server` on `PATH`) |
+| NVIDIA GPU | vLLM, spawned by Surya |
 
-### Common Issues & Solutions
-
-**Issue**: Low confidence scores
-- **Cause**: Poor PDF quality, scanned documents
-- **Solution**: Increase `image_scale` to 3.0 or 4.0
-
-**Issue**: Missing text
-- **Cause**: OCR model limitations on special fonts
-- **Solution**: Check debug PNGs; may require manual annotation
-
-**Issue**: Memory exhaustion
-- **Cause**: Processing too many pages at once
-- **Solution**: Batch smaller PDFs, use `device: "cpu"`
-
-**Issue**: Slow processing
-- **Cause**: No GPU acceleration
-- **Solution**: Install `torch[cuda]` or use Apple Silicon MPS
-
-### Advanced Usage
-
-#### Batch Processing Multiple PDFs
-```python
-from pathlib import Path
-from src.extractors.pdf_marker_v2 import PDFMarkerExtractorV2
-
-extractor = PDFMarkerExtractorV2()
-pdf_dir = Path("data/raw")
-
-for pdf_file in pdf_dir.glob("*.pdf"):
-    result = extractor.extract(pdf_file)
-    print(f"✓ {pdf_file.name}: {len(result['pages'])} pages")
-```
-
-#### Custom Confidence Filtering
-```python
-# Post-process OCR to filter low-confidence text
-for page in ocr_data:
-    high_conf_lines = [
-        line for line in page["text_lines"]
-        if line["confidence"] >= 0.85
-    ]
-    page["text_lines"] = high_conf_lines
-```
-
-#### Extracting Specific Pages Only
-```python
-# Modify load_pdf_images to select page range
-images = [imgs[i] for i in range(0, 10)]  # First 10 pages
-```
+`device: mps` does not run recognition. A cold server start can take several minutes; later PDFs reuse it.
 
 ## Base Extractor Interface
 

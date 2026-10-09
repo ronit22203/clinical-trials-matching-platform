@@ -55,7 +55,7 @@ PDF (data/raw/)
 ```
 data/ocr/
 ├── medical_report_ocr.json
-│   └── Content: Array of pages with text_lines, bbox, confidence
+│   └── Content: Array of pages with layout blocks (label, html, bbox, skipped)
 │
 └── medical_report/
     └── debug_visualizations/
@@ -69,18 +69,26 @@ data/ocr/
 [
   {
     "page_number": 1,
-    "image_bbox": [0, 0, 612, 792],
-    "text_lines": [
+    "image_bbox": [0, 0, 1224, 1584],
+    "blocks": [
       {
-        "text": "<b>MEDICAL REPORT</b>",
-        "confidence": 0.95,
+        "label": "SectionHeader",
+        "reading_order": 0,
+        "html": "Methods",
         "bbox": [50, 50, 200, 75],
-        "polygon": [[50, 50], [200, 50], [200, 75], [50, 75]]
+        "confidence": 0.95,
+        "skipped": false
       },
-      ...
+      {
+        "label": "Picture",
+        "reading_order": 1,
+        "html": "",
+        "bbox": [50, 400, 500, 700],
+        "confidence": null,
+        "skipped": true
+      }
     ]
-  },
-  ...
+  }
 ]
 ```
 
@@ -99,8 +107,9 @@ data/markdown/
 ```
 
 **Features**:
-- Infers headers from bold text & layout geometry
-- Preserves spatial structure (paragraphs, gaps)
+- Headers come from `SectionHeader` blocks, in model reading order
+- HTML tables become pipe tables, one cell per `<td>` / `<th>`
+- Graphical blocks are skip markers (`skipped: true`), not guessed symbols
 - No cleaning applied yet (raw conversion)
 
 **Sample Output**:
@@ -367,8 +376,8 @@ Starting with `patient_analysis.pdf`:
    python scripts/run_pipeline.py
 
 3. Inspect Outputs
-   # OCR JSON (raw Surya output with 450+ text lines)
-   data/ocr/patient_analysis_ocr.json (4.2 MB)
+   # OCR JSON (Surya v2 layout blocks, no polygons)
+   data/ocr/patient_analysis_ocr.json
    data/ocr/patient_analysis/debug_visualizations/ (8 PNG files)
    
    # Converted Markdown (structure inferred, no cleaning)
@@ -398,8 +407,8 @@ Starting with `patient_analysis.pdf`:
 **Fix**: Increase `IMAGE_SCALE` in `pdf_marker_v2.py` (from 2 to 3)
 
 ### Missing Headers in Converted Markdown
-**Check**: Surya might not detect bold formatting correctly  
-**Fix**: Adjust header detection heuristics in `surya_converter.py`
+**Check**: The page JSON has no `SectionHeader` block for that title  
+**Fix**: Confirm the layout label in the OCR JSON. The converter does not promote bold lines on its own.
 
 ### Large Chunk Gaps
 **Check**: `chunk_size` in `config/settings.yaml`  

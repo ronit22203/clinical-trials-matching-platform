@@ -38,6 +38,9 @@ hf-xet==1.2.0
 hpack==4.1.0
 httpcore==1.0.9
 httpx==0.28.1
+# google-genai==1.56.0 requires httpx>=0.28.1. surya-ocr==0.20.0 declares
+# httpx<0.28. Leave httpx at 0.28.1; do not lower it, and do not expect
+# `pip install -r requirements.txt` to resolve both pins in one environment.
 huggingface-hub==0.36.0
 humanfriendly==10.0
 hyperframe==6.1.0
@@ -118,7 +121,7 @@ spacy==3.8.11
 spacy-legacy==3.0.12
 spacy-loggers==1.0.5
 srsly==2.5.2
-surya-ocr==0.17.0
+surya-ocr==0.20.0
 sympy==1.14.0
 tenacity==9.1.2
 thinc==8.3.10

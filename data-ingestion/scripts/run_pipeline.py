@@ -19,7 +19,13 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.determinism import DeterminismTracker
 from src.config_loader import load_ingestion_config
-from src.extractors.pdf_marker_v2 import initialize_models, load_pdf_images, serialize_surya_results
+from src.extractors.pdf_marker_v2 import (
+    initialize_models,
+    load_pdf_images,
+    run_ocr,
+    save_debug_images,
+    serialize_surya_results,
+)
 from src.extractors.surya_converter import SuryaToMarkdown
 from src.processors.cleaner import TextCleaner
 from src.processors.chunker import MarkdownChunker
@@ -183,11 +189,12 @@ class MedicalDataPipeline:
         
         # Load models once for all PDFs (significant time savings)
         if not skip_ocr:
-            self.logger.info("Initializing Surya OCR models...")
+            self.logger.info("Initializing Surya v2...")
             try:
                 ocr_config = self.config.get('ocr', {})
                 device = ocr_config.get('device', 'mps')
-                self.predictors = initialize_models(device=device)
+                backend = ocr_config.get('inference_backend', 'auto')
+                self.predictors = initialize_models(device=device, inference_backend=backend)
             except Exception as e:
                 self.logger.error(f"Failed to initialize models: {e}")
                 return False
@@ -352,83 +359,42 @@ class MedicalDataPipeline:
         return failed == 0
     
     def _stage1_ocr(self, pdf_file: Path, filename: str) -> Path:
-        """Stage 1: PDF -> OCR JSON using Surya"""
+        """Stage 1: PDF -> block OCR JSON using Surya v2"""
         pdf_ocr_dir = self.ocr_dir / filename
         pdf_ocr_dir.mkdir(parents=True, exist_ok=True)
         
         try:
-            # Convert PDF to images
-            images = load_pdf_images(str(pdf_file))
+            ocr_cfg = self.config.get('ocr', {})
+            images = load_pdf_images(
+                str(pdf_file),
+                image_scale=ocr_cfg.get('image_scale'),
+                max_pages=ocr_cfg.get('max_pages'),
+            )
             self.logger.info(f"    • Rendered {len(images)} pages")
             
-            # Run OCR
-            detection_predictor = self.predictors["detection"]
-            recognition_predictor = self.predictors["recognition"]
-            
-            results = []
-            for i, image in enumerate(images):
-                self.logger.debug(f"    • OCR page {i + 1}/{len(images)}")
-                
-                # Detection
-                detection_result = detection_predictor([image])
-                
-                # Convert polygons to bboxes
-                bboxes = []
-                for poly_box in detection_result[0].bboxes:
-                    if hasattr(poly_box, 'polygon') and len(poly_box.polygon) > 0:
-                        xs = [p[0] for p in poly_box.polygon]
-                        ys = [p[1] for p in poly_box.polygon]
-                        bbox = [[min(xs), min(ys), max(xs), max(ys)]]
-                        bboxes.extend(bbox)
-                
-                # Recognition
-                if bboxes:
-                    recognition_result = recognition_predictor(images=[image], bboxes=[bboxes])
-                    results.append(recognition_result[0])
-            
-            # Serialize results
+            results = run_ocr(images, self.predictors["recognition"])
             json_output = serialize_surya_results(results)
             
-            # Save OCR JSON
             ocr_json_path = self.ocr_dir / f"{filename}_ocr.json"
             with open(ocr_json_path, 'w', encoding='utf-8') as f:
                 json.dump(json_output, f, indent=2, ensure_ascii=False)
             
             self.logger.info(f"    • Saved OCR JSON: {ocr_json_path.name}")
             
-            # Save debug visualizations (toggled by config)
-            if self.config.get('ocr', {}).get('save_debug_images', True):
-                self._save_debug_images(images, results, pdf_ocr_dir, filename)
+            if ocr_cfg.get('save_debug_images', True):
+                page_info = save_debug_images(
+                    images,
+                    results,
+                    pdf_ocr_dir / "debug_visualizations",
+                    filename,
+                    ocr_cfg.get('confidence_threshold', 0.80),
+                )
+                self.logger.debug(f"    • Saved {len(page_info)} debug image(s)")
             
             return ocr_json_path
             
         except Exception as e:
             raise RuntimeError(f"Stage 1 (OCR) failed: {str(e)}")
-    
-    def _save_debug_images(self, images, results, output_dir, filename):
-        """Save debug visualization images with OCR boxes"""
-        from PIL import ImageDraw
-        
-        confidence_threshold = self.config.get('ocr', {}).get('confidence_threshold', 0.80)
-        
-        debug_dir = output_dir / "debug_visualizations"
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        
-        for i, (image, result) in enumerate(zip(images, results)):
-            image_copy = image.copy()
-            draw = ImageDraw.Draw(image_copy)
-            
-            # Draw bounding boxes
-            for line in result.text_lines:
-                box = line.bbox
-                confidence = line.confidence
-                color = "green" if confidence >= confidence_threshold else "red"
-                draw.rectangle(box, outline=color, width=2)
-            
-            # Save debug image
-            debug_image_path = debug_dir / f"{filename}_page_{i+1:03d}_debug.png"
-            image_copy.save(debug_image_path)
-            self.logger.debug(f"    • Saved debug image: {debug_image_path.name}")
     
     def _stage2_convert(self, ocr_json_path: Path, filename: str) -> Path:
         """Stage 2: OCR JSON -> Markdown using SuryaToMarkdown"""
