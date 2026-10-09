@@ -132,3 +132,11 @@ temp/
 # ─── Benchmark results (raw run outputs) ─────────────────────────────────────
 benchmarking/results/
 .service_pids/
+
+# ─── Terraform ────────────────────────────────────────────────────────────────
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log

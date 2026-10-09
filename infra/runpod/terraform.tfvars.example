@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars and set the saved template name from the RunPod UI.
+template_name = "your-template-name"
+
+# pod_enabled   = true
+# gpu_type_ids  = ["NVIDIA L4"]
+# cloud_type    = "SECURE"
+# ports         = ["22/tcp", "5173/http", "8000/http", "8002/http"]
+# data_center_ids = []
