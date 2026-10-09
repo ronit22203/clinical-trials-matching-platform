@@ -32,22 +32,23 @@ data/artifacts/chunk/         ← JSON array of token-bounded chunks
 
 ## Stage 1 — OCR
 
-**Tool:** Surya (deep learning OCR)  
+**Tool:** Surya v2 (`surya-ocr==0.20.0`)  
 **Config path:** `data_ingestion.ocr`
 
-Surya processes each PDF page using a detection model followed by a recognition model. On Apple Silicon, inference runs on MPS; on CPU-only hosts, it falls back gracefully.
+Surya v2 returns layout blocks in reading order (`label`, `html`, `bbox`, `confidence`, `skipped`). Recognition runs through an on-premise inference server: llama.cpp on Apple Silicon (`brew install llama.cpp`) or vLLM on NVIDIA. `device` is only the torch device for leftover detection weights.
 
 Key configuration parameters:
 
 | Parameter | Default | Effect |
 |-----------|---------|--------|
-| `device` | `mps` | Inference device (`mps`, `cuda`, `cpu`) |
+| `inference_backend` | `auto` | `auto`, `llama.cpp`, or `vllm`. `auto` picks llama.cpp unless an NVIDIA GPU is present |
+| `device` | `mps` | Torch device for leftover detection weights (`mps`, `cuda`, `cpu`) |
 | `image_scale` | `2` | Upscale factor before OCR — higher values improve accuracy on small text |
-| `confidence_threshold` | `0.8` | Lines below this score are discarded |
-| `save_debug_images` | `true` | Saves annotated debug images to `extract/debug/` |
+| `confidence_threshold` | `0.8` | Text blocks below this score are omitted from Markdown. Skipped figures are kept as markers |
+| `save_debug_images` | `true` | Saves annotated debug images. Green is confident text, red is low confidence, orange is a skipped figure |
 | `max_pages` | `null` | Set to an integer to limit pages per document (useful for large PDFs) |
 
-Output: one JSON file per document containing all page-level text blocks with bounding boxes and confidence scores.
+Output: one JSON file per document. Each page has `blocks` with `label`, `reading_order`, `html`, `bbox`, `confidence`, and `skipped`. Polygons are not stored. A `skipped: true` block is a graphical region that was not OCR'd.
 
 ---
 
@@ -56,14 +57,7 @@ Output: one JSON file per document containing all page-level text blocks with bo
 **Tool:** custom Markdown converter  
 **Config path:** `data_ingestion.conversion`
 
-Reconstructs document structure from the OCR output. Heuristics infer section headers, detect bold text, and preserve paragraph spacing.
-
-| Parameter | Default | Effect |
-|-----------|---------|--------|
-| `infer_headers` | `true` | Promotes short, bold lines to Markdown headers |
-| `bold_header_max_chars` | `50` | Lines longer than this are not promoted to headers |
-| `preserve_spacing` | `true` | Retains inter-paragraph whitespace |
-| `paragraph_gap_multiplier` | `2.0` | Multiplier applied to average line height to detect paragraph breaks |
+Walks Surya v2 blocks in `reading_order`. `SectionHeader` becomes a Markdown heading, HTML tables become pipe tables, and graphical blocks become `<!-- layout:… skipped:true -->` markers. Page headers and footers are dropped. Text blocks below `ocr.confidence_threshold` are omitted.
 
 Output: one `.md` file per document.
 

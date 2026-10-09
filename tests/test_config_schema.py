@@ -79,6 +79,12 @@ class TestIngestionConfig:
         threshold = self._ing["ocr"].get("confidence_threshold", 0.8)
         assert 0.0 <= threshold <= 1.0
 
+    def test_ocr_backend_is_surya_v2(self):
+        ocr = self._ing["ocr"]
+        assert ocr["inference_backend"] in {"auto", "llama.cpp", "vllm"}
+        assert "det_batch_size" not in ocr
+        assert "rec_batch_size" not in ocr
+
 
 # ---------------------------------------------------------------------------
 # data_acquisition section
@@ -175,7 +181,8 @@ class TestAgenticReasoningConfig:
     def test_reasoning_agent_has_explicit_fallback_and_retrieval_guardrails(self):
         agent = self._ar["agent"]
         graphrag = self._ar["graphrag"]["config"]
-        assert agent["fallback_model"].startswith("lmstudio/")
+        assert agent["model"] == "ollama/medgemma:4b"
+        assert agent["fallback_model"] == "ollama/medgemma:4b"
         assert agent["health_check_timeout_seconds"] > 0
         assert graphrag["scope"] == "literature"
         assert graphrag["retrieval_targets"] == [

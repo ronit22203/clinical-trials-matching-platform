@@ -42,12 +42,11 @@ data_ingestion:
 ```yaml
   ocr:
     langs: [en]
-    device: mps                   # mps | cuda | cpu
-    det_batch_size: 2
-    rec_batch_size: 16
+    device: mps                   # torch device for leftover detection weights
+    inference_backend: auto       # auto | llama.cpp | vllm
     image_scale: 2                # upscale factor; higher = better accuracy on small text
-    confidence_threshold: 0.8     # lines below this score are discarded
-    save_debug_images: true       # annotated images written to extract/debug/
+    confidence_threshold: 0.8     # text blocks below this score are omitted from Markdown
+    save_debug_images: true       # annotated images written next to the OCR JSON
     max_pages: null               # integer to limit pages per document; null = no limit
 ```
 
@@ -55,10 +54,11 @@ data_ingestion:
 
 ```yaml
   conversion:
+    # Present in config. The Surya v2 converter follows layout labels and does not read these.
     infer_headers: true
     preserve_spacing: true
     paragraph_gap_multiplier: 2.0
-    bold_header_max_chars: 50     # lines longer than this are not promoted to headers
+    bold_header_max_chars: 50
 ```
 
 ### Cleaning
