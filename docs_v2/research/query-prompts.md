@@ -1,6 +1,8 @@
-**Core Trial Matching (the primary use case)**
+# Query Prompts
 
-These test if your retrieval + graph reasoning actually surfaces relevant studies:
+## Core trial matching
+
+These prompts check the primary use case: retrieval and graph reasoning should surface relevant studies.
 
 - *"58-year-old male, ICU, suspected septic shock, on norepinephrine, lactate 4.2 — are there any trials I should consider enrolling him in?"*
 - *"My patient has treatment-resistant sepsis, already failed broad-spectrum antibiotics after 72 hours. What trials are looking at adjunct therapies?"*

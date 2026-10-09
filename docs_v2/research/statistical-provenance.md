@@ -1,3 +1,5 @@
+# Statistical Provenance
+
 ## 1. Retrieval Metrics (Qdrant + Neo4j → Top-K Chunks)
 
 You have 20 queries. For each query, the system returns a ranked list of chunks (up to K=10). The golden file tells you which chunks are relevant (2 = highly relevant, 1 = partially relevant).

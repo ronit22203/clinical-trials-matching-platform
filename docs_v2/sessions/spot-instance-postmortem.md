@@ -40,7 +40,7 @@ Service health checks were good for the components that did start:
 
 ### 1. Infrastructure startup
 
-The production startup path in `docs_v2/prod-startup.md` correctly points operators toward native service startup for Qdrant and Neo4j on Ubuntu/L4 machines. In practice, both services came up and stayed healthy.
+The production startup path in `docs_v2/guides/prod-startup.md` correctly points operators toward native service startup for Qdrant and Neo4j on Ubuntu/L4 machines. In practice, both services came up and stayed healthy.
 
 ### 2. Reasoning API
 
@@ -102,7 +102,7 @@ That meant ingestion was not a lightweight API install on this host; it was anot
 
 ### 4. The production docs assume a happier host than the real one
 
-`docs_v2/prod-startup.md` describes `bash scripts/pre_requisites.sh` and the follow-up make targets as the standard production path, including:
+`docs_v2/guides/prod-startup.md` describes `bash scripts/pre_requisites.sh` and the follow-up make targets as the standard production path, including:
 
 - reasoning venv creation
 - ingestion dependency install
@@ -171,7 +171,7 @@ Why we are stopping here:
 
 ## Key evidence
 
-- `docs_v2/prod-startup.md`
+- `docs_v2/guides/prod-startup.md`
 - `Makefile`
 - `agentic-reasoning/pyproject.toml`
 - `core-llm-inference/pyproject.toml`

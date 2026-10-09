@@ -1,33 +1,52 @@
 # Documentation
 
-![MARA — Active Session](assets/ui-active-session.png)
+![Production UI](assets/production_ui.png)
+
+Pages are grouped by job. Guides are how you run the platform. Reference is how it is built. Operations is CI and RunPod. Sessions are dated notes. Research is design notes and eval writeups.
 
 ## Guides
 
 | Document | Description |
 |----------|-------------|
-| [Quickstart](quickstart.md) | Prerequisites, installation, and first run (macOS / local dev) |
-| [Production Startup](prod-startup.md) | Ubuntu 22.04 + NVIDIA L4 — SGLang, native Neo4j/Qdrant, no Docker |
-| [Spot Instance Postmortem](spot-instance-postmortem.md) | Where production startup on a spot instance succeeded, stalled, and why the instance was terminated |
-| [Architecture](architecture.md) | System design, module topology, data flow |
-| [Data Pipeline](data-pipeline.md) | Six-stage ingestion pipeline reference |
-| [Agent Framework](agent-framework.md) | LangGraph ReAct runtime and tool plugin system |
+| [Quickstart](guides/quickstart.md) | Local install and first run |
+| [Production Startup](guides/prod-startup.md) | Ubuntu 22.04 and an NVIDIA L4: services, inference, and the Blueprint UI |
+| [Make Reference](guides/make-reference.md) | Root `make` targets |
 
 ## Reference
 
 | Document | Description |
 |----------|-------------|
-| [Configuration](configuration.md) | `config/app.yaml` field-by-field reference |
-| [API Reference](api-reference.md) | FastAPI endpoint schemas and examples |
-| [Backend Endpoints](backend-endpoints.md) | Query & Retrieval + Ingestion Pipeline endpoint specs, TypeScript types, SSE events |
-| [Make Reference](make-reference.md) | All `make` targets organised by module |
+| [Architecture](reference/architecture.md) | Module topology and data flow |
+| [Data Pipeline](reference/data-pipeline.md) | Ingestion stages from PDF to graph and vectors |
+| [Agent Framework](reference/agent-framework.md) | Reasoning runtime and tools |
+| [Configuration](reference/configuration.md) | `config/app.yaml` field reference |
+| [API Reference](reference/api-reference.md) | FastAPI request and response shapes |
+| [Backend Endpoints](reference/backend-endpoints.md) | Query, retrieval, and ingestion endpoints, including SSE |
+| [UI Integration](reference/ui-integration.md) | Contracts for replacing UI mock data with live responses |
 
-## Module Overview
+## Operations
 
-```
-agentic-reasoning/   LangGraph ReAct + concurrent tool execution
-data-acquisition/    Multi-source PDF fetcher (medRxiv, bioRxiv, PubMed, ClinicalTrials.gov)
-data-ingestion/      PDF → OCR → Markdown → Clean → Chunk → Embed (Qdrant + Neo4j)
-platform-ui/         Next.js 16 App Router frontend
-config/              config/app.yaml — single source of truth for all behaviour
-```
+| Document | Description |
+|----------|-------------|
+| [RunPod Terraform](operations/terraform-runpod.md) | Apply and destroy the GPU pod from a saved RunPod template |
+| [CI](operations/ci.md) | What `.github/workflows/ci.yml` runs and why |
+
+## Sessions
+
+| Document | Description |
+|----------|-------------|
+| [RunPod — 2026-08-01](sessions/runpod-2026-08-01.md) | Auth, ports, and the first pod bring-up |
+| [RunPod — 2026-08-02](sessions/runpod-2026-08-02.md) | Proxy auth, ingestion moved to port 8002 |
+| [Spot Instance Postmortem](sessions/spot-instance-postmortem.md) | What came up on a spot box, and why it was terminated |
+
+## Research
+
+| Document | Description |
+|----------|-------------|
+| [Query Prompts](research/query-prompts.md) | Trial-matching and evidence prompts for manual checks |
+| [Query Suite](research/query-suite.md) | Staged checks for OCR, retrieval, and graph reasoning |
+| [Reranker](research/reranker.md) | Recall change after cross-encoder reranking |
+| [Statistical Provenance](research/statistical-provenance.md) | Recall, precision, and extraction metrics |
+| [Fact-level Provenance](research/fact-level-provenance.md) | Plan for byte-range provenance, entity resolution, and resume |
+| [Surya OCR](research/surya-ocr.md) | What Surya v2 changes relative to the v1 extractor |
+| [LM Studio Models](research/lm-studio-models.md) | Local model choice for reasoning and extraction |

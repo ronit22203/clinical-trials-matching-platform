@@ -2,7 +2,7 @@
 
 This guide covers standing the platform up from scratch on a headless Ubuntu 22.04 server with
 an NVIDIA L4 GPU (Ada Lovelace, 23 GB VRAM). It replaces the [Quickstart](quickstart.md)
-macOS-centric flow.
+macOS-centric flow. Renting that GPU is [RunPod Terraform](../operations/terraform-runpod.md).
 
 **Inference deployment path (choose one):**
 

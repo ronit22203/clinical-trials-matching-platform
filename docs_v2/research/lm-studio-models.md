@@ -1,4 +1,3 @@
-
 # LM Studio Language Model Selection
 
 ## Strategy: One Model, Two Use Cases

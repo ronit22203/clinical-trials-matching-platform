@@ -1,4 +1,6 @@
-Yes — **Surya 2 is real**, and it is a genuine upgrade. Datalab shipped it as **`surya-ocr` v0.20.0 on 27 May 2026**. This platform is still on **v1 (`surya-ocr==0.17.0`)**.
+# Surya OCR v2
+
+Surya 2 is a real upgrade. Datalab shipped it as **`surya-ocr` v0.20.0 on 27 May 2026**. This platform is still on **v1 (`surya-ocr==0.17.0`)**.
 
 v1 is a **stack of separate Torch models**: detect lines, then recognize them, plus optional layout/table models. That is exactly what `pdf_marker_v2.py` / the ingest server do (`load_predictors` → detection → recognition → `text_lines`). The `pdf_marker_v2` name is our extractor, not Surya 2.
 
