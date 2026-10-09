@@ -31,7 +31,7 @@ The pod volume mounted at `/workspace` survives a stop and start. It is deleted 
 | `infra/runpod/outputs.tf` | Pod id, public IP, hourly cost, Blueprint URL |
 | `infra/runpod/terraform.tfvars.example` | Copy to `terraform.tfvars` |
 
-`pod.tf` loads every template and keeps the one whose name matches `template_name` and is not serverless. `one()` fails the plan if that name matches nothing or more than one template.
+`pod.tf` loads every template and keeps the one whose name matches `template_name` and is not serverless. If that name matches nothing, the plan lists the private pod templates on the account. If it matches more than one, rename one of them in the RunPod UI.
 
 ## Variables
 
