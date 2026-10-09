@@ -278,18 +278,18 @@ else
   ok "Ollama installed"
 fi
 
-# Pull Qwen2.5-7B if not already cached
-if ollama list 2>/dev/null | grep -q "qwen2.5:7b"; then
-  ok "qwen2.5:7b already pulled"
+# Pull the local Ollama chat model if it is not already cached.
+if ollama list 2>/dev/null | grep -q "medgemma:4b"; then
+  ok "medgemma:4b already pulled"
 else
-  info "Pulling qwen2.5:7b (~4.7 GB, uses GPU automatically)…"
+  info "Pulling medgemma:4b (~3.3 GB, uses GPU automatically)…"
   ollama serve >/tmp/ollama_pull.log 2>&1 &
   OLLAMA_PID=$!
   sleep 4
-  ollama pull qwen2.5:7b \
-    || warn "Model pull failed — run 'ollama pull qwen2.5:7b' manually after starting ollama serve"
+  ollama pull medgemma:4b \
+    || warn "Model pull failed — run 'ollama pull medgemma:4b' manually after starting ollama serve"
   kill "$OLLAMA_PID" 2>/dev/null || true
-  ok "qwen2.5:7b ready"
+  ok "medgemma:4b ready"
 fi
 
 # ── 10. palantir-blueprint node_modules ──────────────────────────────────────

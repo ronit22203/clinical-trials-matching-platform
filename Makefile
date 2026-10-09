@@ -42,7 +42,7 @@ INFERENCE_IMAGE        := $(INFERENCE_IMAGE_REPO):$(INFERENCE_IMAGE_TAG)
 INFERENCE_IMAGE_LATEST := $(INFERENCE_IMAGE_REPO):latest
 
 # Ollama fallback — model name uses Ollama's registry format (not HuggingFace path)
-INFERENCE_MODEL_OLLAMA ?= qwen2.5:7b
+INFERENCE_MODEL_OLLAMA ?= medgemma:4b
 
 SOURCE ?= medrxiv
 MAX_PDFS ?= 2
