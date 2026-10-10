@@ -33,6 +33,8 @@ The pod volume mounted at `/workspace` survives a stop and start. It is deleted 
 
 `pod.tf` loads every template and keeps the one whose name matches `template_name` and is not serverless. If that name matches nothing, the plan lists the private pod templates on the account. If it matches more than one, rename one of them in the RunPod UI.
 
+`image_name` is copied from that template. Provider v1.0.1 does not read the image back from the RunPod API, so leaving it unset makes apply fail after the pod already exists and marks the pod tainted. A tainted pod is replaced on the next apply.
+
 ## Variables
 
 | Variable | Default | Purpose |

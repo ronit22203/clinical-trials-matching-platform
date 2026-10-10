@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Dump every live platform metric to stdout. Dev / prod-startup use.
 
-Reads .env.local, probes services from docs_v2/prod-startup.md, prints
+Reads .env.local, probes services from docs_v2/guides/prod-startup.md, prints
 artifact counts, Qdrant/Neo4j stats, inference health, GPU, and (if present)
 every key from the latest benchmarking run.
 
@@ -38,7 +38,7 @@ BOLD = "\033[1m"
 DIM = "\033[2m"
 NC = "\033[0m"
 
-# Ports from docs_v2/prod-startup.md + Makefile `dev`
+# Ports from docs_v2/guides/prod-startup.md + Makefile `dev`
 SERVICES: list[tuple[str, str, int, str]] = [
     ("Qdrant HTTP", "QDRANT_URL", 6333, "/collections"),
     ("Qdrant gRPC", "", 6334, ""),
