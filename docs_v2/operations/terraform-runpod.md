@@ -15,6 +15,8 @@ Once the pod is up, follow [Production Startup](../guides/prod-startup.md).
 | Cloud | `SECURE` |
 | Ports | `22/tcp`, `5173/http`, `8000/http`, `8002/http` |
 | Name | `healthcare-platform` |
+| `/workspace` volume | 100 GB (`volume_in_gb`). The provider's own default is 20 GB |
+| Container disk | 50 GB. Wiped on restart |
 
 `8001` is RunPod’s own nginx. Ingestion listens on `8002`. The Blueprint UI is `https://<pod-id>-5173.proxy.runpod.net`.
 
@@ -45,6 +47,8 @@ The pod volume mounted at `/workspace` survives a stop and start. It is deleted 
 | `cloud_type` | `SECURE` | `SECURE` or `COMMUNITY` |
 | `ports` | `22/tcp`, `5173/http`, `8000/http`, `8002/http` | Add `"PORT/udp"` only if you need UDP |
 | `data_center_ids` | `[]` | Empty lets RunPod place the pod by availability |
+| `volume_in_gb` | `100` | Persistent `/workspace` disk. The running pod was created at the provider default of 20 GB |
+| `container_disk_in_gb` | `50` | Temporary container disk |
 
 Do not put `AUTH_*` or the API key in `.tf` or `terraform.tfvars`. Set secrets on the template. Export the API key in the shell.
 
@@ -59,6 +63,8 @@ terraform apply                                 # spin up
 terraform apply -var='pod_enabled=false'        # spin down
 terraform destroy                               # delete the pod
 ```
+
+`terraform destroy` deletes the pod and the `/workspace` volume. The saved RunPod template stays. Confirm with `yes`. Billing for that pod stops when the destroy finishes. Run it from `infra/runpod` with `RUNPOD_API_KEY` set. A new `terraform apply` creates another pod, and that pod picks up `volume_in_gb`. Changing the size on the pod that is already running does not grow its disk; destroy it first, then apply.
 
 State stays on the machine. `.terraform/`, `*.tfstate`, and `*.tfvars` are gitignored. `terraform.tfvars.example` and `.terraform.lock.hcl` are committed.
 

@@ -37,3 +37,15 @@ variable "data_center_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "volume_in_gb" {
+  description = "Persistent pod volume mounted at /workspace, in GB. Deleted with the pod. The provider default is 20, which is too small for the CUDA wheels."
+  type        = number
+  default     = 100
+}
+
+variable "container_disk_in_gb" {
+  description = "Ephemeral container disk, in GB. Wiped when the pod restarts."
+  type        = number
+  default     = 50
+}

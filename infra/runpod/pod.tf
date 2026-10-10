@@ -22,7 +22,7 @@ locals {
 resource "terraform_data" "template_name" {
   lifecycle {
     precondition {
-      condition     = length(local.matched_templates) == 1
+      condition = length(local.matched_templates) == 1
       error_message = (
         length(local.matched_templates) > 1
         ? "More than one pod template is named \"${var.template_name}\". Rename one of them in the RunPod UI so the name is unique."
@@ -33,19 +33,21 @@ resource "terraform_data" "template_name" {
 }
 
 resource "runpod_pod" "platform" {
-  count         = var.pod_enabled && length(local.matched_templates) == 1 ? 1 : 0
-  name          = "healthcare-platform"
-  template_id   = local.matched_templates[0].id
+  count       = var.pod_enabled && length(local.matched_templates) == 1 ? 1 : 0
+  name        = "healthcare-platform"
+  template_id = local.matched_templates[0].id
   # The RunPod API omits the image after create. Provider v1.0.1 then leaves
   # image_name unknown and Terraform rejects the apply, tainting a pod that
   # was already created. Setting it from the template keeps the value known.
-  image_name    = local.matched_templates[0].image_name
-  compute_type  = "GPU"
-  cloud_type    = var.cloud_type
-  gpu_count     = 1
-  gpu_type_ids  = var.gpu_type_ids
-  ports         = var.ports
-  interruptible = false
+  image_name           = local.matched_templates[0].image_name
+  compute_type         = "GPU"
+  cloud_type           = var.cloud_type
+  gpu_count            = 1
+  gpu_type_ids         = var.gpu_type_ids
+  ports                = var.ports
+  interruptible        = false
+  volume_in_gb         = var.volume_in_gb
+  container_disk_in_gb = var.container_disk_in_gb
 
   data_center_ids = length(var.data_center_ids) > 0 ? var.data_center_ids : null
   depends_on      = [terraform_data.template_name]
