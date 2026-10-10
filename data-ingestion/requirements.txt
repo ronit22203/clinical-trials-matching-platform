@@ -30,17 +30,14 @@ flatbuffers==25.12.19
 fsspec==2025.12.0
 ftfy==6.3.1
 google-auth==2.45.0
-google-genai==1.56.0
 grpcio==1.76.0
 h11==0.16.0
 h2==4.3.0
 hf-xet==1.2.0
 hpack==4.1.0
 httpcore==1.0.9
-httpx==0.28.1
-# google-genai==1.56.0 requires httpx>=0.28.1. surya-ocr==0.20.0 declares
-# httpx<0.28. Leave httpx at 0.28.1; do not lower it, and do not expect
-# `pip install -r requirements.txt` to resolve both pins in one environment.
+# surya-ocr==0.20.0 requires httpx>=0.27,<0.28.
+httpx==0.27.2
 huggingface-hub==0.36.0
 humanfriendly==10.0
 hyperframe==6.1.0
@@ -62,7 +59,6 @@ langsmith==0.5.1
 loguru==0.7.3
 markdown2==2.5.4
 markdownify==1.2.2
-marker-pdf==1.10.1
 MarkupSafe==3.0.3
 mmh3==5.2.0
 mpmath==1.3.0

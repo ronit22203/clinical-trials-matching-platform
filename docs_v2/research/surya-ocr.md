@@ -54,4 +54,4 @@ Markdown follows that reading order. Section headers become headings, HTML table
 
 `data-ingestion/tests/test_surya_blocks.py` passed (4 tests) without loading the model.
 
-**Install conflict, left unresolved on purpose.** `surya-ocr==0.20.0` declares `httpx<0.28`. `google-genai==1.56.0` in the same requirements file requires `httpx>=0.28.1`, so `httpx` stays at `0.28.1`. `pip install -r data-ingestion/requirements.txt` will not resolve both pins in one environment.
+`data-ingestion/requirements.txt` pins `surya-ocr==0.20.0` and `httpx==0.27.2`. `marker-pdf` and `google-genai` are not in that file: Marker 1.10 requires Surya 0.17, and `google-genai` requires `httpx>=0.28.1`.
