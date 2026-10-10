@@ -37,6 +37,7 @@ Pages are grouped by job. Guides are how you run the platform. Reference is how 
 |----------|-------------|
 | [RunPod — 2026-08-01](sessions/runpod-2026-08-01.md) | Auth, ports, and the first pod bring-up |
 | [RunPod — 2026-08-02](sessions/runpod-2026-08-02.md) | Proxy auth, ingestion moved to port 8002 |
+| [RunPod — 2026-10-10](sessions/runpod-2026-10-10.md) | Incident: login, then OCR blocked on Docker and glibc |
 | [Spot Instance Postmortem](sessions/spot-instance-postmortem.md) | What came up on a spot box, and why it was terminated |
 
 ## Research

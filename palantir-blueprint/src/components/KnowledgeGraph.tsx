@@ -102,13 +102,22 @@ export default function KnowledgeGraph({ onTrialClick, highlightedNct, nodes: pr
     return edge.from !== selectedNode && edge.to !== selectedNode;
   }
 
+  function pointFor(id: string): { x: number; y: number } | null {
+    const dragged = positions[id];
+    if (dragged) return dragged;
+    const node = liveNodes.find((n) => n.id === id);
+    return node ? { x: node.x, y: node.y } : null;
+  }
+
   function handleNodeMouseDown(e: React.MouseEvent, nodeId: string) {
     e.stopPropagation();
+    const origin = pointFor(nodeId);
+    if (!origin) return;
     const svg = toSVGCoords(e);
     dragRef.current = {
       id: nodeId,
-      nodeStartX: positions[nodeId].x,
-      nodeStartY: positions[nodeId].y,
+      nodeStartX: origin.x,
+      nodeStartY: origin.y,
       svgStartX: svg.x,
       svgStartY: svg.y,
       moved: false,
@@ -192,21 +201,24 @@ export default function KnowledgeGraph({ onTrialClick, highlightedNct, nodes: pr
         >
           {/* Edges */}
           {liveEdges.map((edge, i) => {
-            const f = positions[edge.from];
-            const t = positions[edge.to];
+            const f = pointFor(edge.from);
+            const t = pointFor(edge.to);
             if (!f || !t) return null;
             const edgeDimmed = isEdgeDimmed(edge);
             const edgeActive = selectedNode && !edgeDimmed;
             const isHoveredEdge = hoveredEdge === i;
             const mx = (f.x + t.x) / 2;
             const my = (f.y + t.y) / 2;
+            const emphasized = Boolean(edgeActive || isHoveredEdge);
             return (
               <g key={i} opacity={edgeDimmed ? 0.07 : 1}>
                 <line
                   x1={f.x} y1={f.y}
                   x2={t.x} y2={t.y}
-                  stroke={edgeActive || isHoveredEdge ? "var(--status-info)" : "var(--graph-edge)"}
-                  strokeWidth={edgeActive || isHoveredEdge ? 1.5 : 1}
+                  stroke={emphasized ? "var(--status-info)" : "var(--graph-edge)"}
+                  strokeWidth={emphasized ? 2.25 : 1.75}
+                  vectorEffect="non-scaling-stroke"
+                  strokeLinecap="round"
                 />
                 {/* Invisible wider hit area for edge hover */}
                 <line

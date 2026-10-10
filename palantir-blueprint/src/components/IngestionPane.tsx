@@ -23,6 +23,7 @@ import {
   fetchChunks,
   fetchMarkdownArtifact,
   fetchCleanArtifact,
+  fetchOcrVizObjectUrl,
   getOcrVizUrl,
   startIngestStream,
 } from "../lib/api";
@@ -75,23 +76,51 @@ const ENTITY_COLORS: Record<ChunkEntity["type"], { bg: string; text: string }> =
 // ─── Sub-components ───────────────────────────────────────────
 
 function OcrDebugViz({
-  vizUrl,
+  slug,
   page,
   pageCount,
   onPageChange,
 }: {
-  vizUrl: string | null;
+  slug: string | null;
   page: number;
   pageCount: number;
   onPageChange: (p: number) => void;
 }) {
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!slug) {
+      setObjectUrl(null);
+      setLoadError(null);
+      return;
+    }
+    const ctrl = new AbortController();
+    let created: string | null = null;
+    let cancelled = false;
+    setObjectUrl(null);
     setLoadError(null);
-  }, [vizUrl]);
+    fetchOcrVizObjectUrl(slug, page, ctrl.signal)
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        created = url;
+        setObjectUrl(url);
+      })
+      .catch((err: unknown) => {
+        if (cancelled || (err instanceof Error && err.name === "AbortError")) return;
+        setLoadError(err instanceof Error ? err.message : "The visualization image could not be loaded.");
+      });
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [slug, page]);
 
-  if (!vizUrl) {
+  if (!slug) {
     return (
       <Card elevation={Elevation.ONE} style={{ height: 175, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--surface-2)", borderRadius: 6 }}>
         <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>OCR debug visualization available after ingestion completes</span>
@@ -108,13 +137,15 @@ function OcrDebugViz({
           <Callout intent={Intent.DANGER} icon="error" title="OCR visualization unavailable">
             {loadError}
           </Callout>
-        ) : (
+        ) : objectUrl ? (
           <img
-            src={vizUrl}
+            src={objectUrl}
             alt="OCR debug visualization — bounding boxes overlaid on page"
             style={{ maxHeight: 175, maxWidth: "100%", objectFit: "contain" }}
             onError={() => setLoadError("The visualization image could not be loaded.")}
           />
+        ) : (
+          <span style={{ fontFamily: "var(--text-mono)", fontSize: 10, color: "var(--text-dim)" }}>Loading overlay…</span>
         )}
       </Card>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
@@ -774,13 +805,10 @@ export default function IngestionPane({
               </H5>
             </div>
             <OcrDebugViz
-              vizUrl={ocrVizUrl}
+              slug={ocrVizUrl ? jobId : null}
               page={ocrPage}
               pageCount={ocrPageCount}
-              onPageChange={(p) => {
-                setOcrPage(p);
-                if (jobId) setOcrVizUrl(getOcrVizUrl(jobId, p));
-              }}
+              onPageChange={setOcrPage}
             />
           </div>
         )}

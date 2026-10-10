@@ -336,9 +336,34 @@ export function fetchCleanArtifact(slug: string): Promise<BackendArtifactPreview
   );
 }
 
-/** Returns the URL for an OCR debug visualization PNG (served by the ingestion API). */
+/** Path for an OCR debug visualization PNG. Image tags cannot send the session token. */
 export function getOcrVizUrl(slug: string, page: number): string {
-  return `${INGEST_BASE}/api/ingest/artifacts/ocr-viz/${slug}/${page}`;
+  return `${INGEST_BASE}/api/ingest/artifacts/ocr-viz/${encodeURIComponent(slug)}/${page}`;
+}
+
+/**
+ * GET the OCR debug PNG with the session token and return a blob URL for <img>.
+ * A plain img src is same-origin but does not attach Authorization, so the
+ * ingestion API rejects it with 401.
+ */
+export async function fetchOcrVizObjectUrl(
+  slug: string,
+  page: number,
+  signal?: AbortSignal,
+): Promise<string> {
+  const response = await fetch(getOcrVizUrl(slug, page), {
+    headers: authHeaders(),
+    signal,
+  });
+  if (response.status === 401) {
+    clearToken();
+    window.dispatchEvent(new CustomEvent("auth:logout"));
+  }
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new ApiError(response.status, parseErrorDetail(payload, response.status));
+  }
+  return URL.createObjectURL(await response.blob());
 }
 
 /**
