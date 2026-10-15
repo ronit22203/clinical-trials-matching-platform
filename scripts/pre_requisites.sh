@@ -10,6 +10,9 @@
 #   - Qdrant via static binary from GitHub releases (no Docker needed)
 #   - Ollama for LLM inference (driver-agnostic; replaces SGLang / LM Studio)
 #   - Docker is optional — Qdrant + Neo4j run natively if daemon unavailable
+#   - Blank AUTH_PASSWORD_HASH / AUTH_JWT_SECRET are filled (login admin / admin)
+#   - NVIDIA hosts without Docker use llama.cpp for OCR. llama-server is built
+#     from source (tag b11429); the published CUDA archive needs glibc 2.38.
 
 set -euo pipefail
 
@@ -21,6 +24,19 @@ warn()  { echo -e "${YELLOW}⚠${NC}  $*"; }
 fail()  { echo -e "${RED}✗${NC}  $*"; exit 1; }
 info()  { echo -e "${CYAN}▸${NC}  $*"; }
 header(){ echo -e "\n${BOLD}━━━  $*  ━━━${NC}\n"; }
+
+# A usable llama-server prints a version and is not the Ubuntu 24.04 CUDA
+# archive, which fails to start on this image's glibc 2.35.
+llama_server_ok() {
+  local bin="$1"
+  local out
+  [[ -e "$bin" ]] || return 1
+  out="$("$bin" --version 2>&1)" || return 1
+  case "$out" in
+    *GLIBC_2.38*|*GLIBCXX_3.4.32*) return 1 ;;
+  esac
+  [[ -n "$out" ]]
+}
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -59,8 +75,8 @@ APT_PKGS=(
   apt-utils
   # core tools
   curl wget git jq ca-certificates gnupg lsb-release netcat-openbsd
-  # build tools
-  build-essential software-properties-common pkg-config
+  # build tools (cmake + libcurl: from-source llama-server)
+  build-essential cmake software-properties-common pkg-config libcurl4-openssl-dev
   # Python build / runtime deps
   libssl-dev libffi-dev zlib1g-dev libbz2-dev libreadline-dev
   libsqlite3-dev libncursesw5-dev xz-utils libxml2-dev libxmlsec1-dev liblzma-dev
@@ -323,18 +339,249 @@ ok "data/ subdirectory tree ready"
 # ── 12. .env.local ────────────────────────────────────────────────────────────
 header ".env.local"
 
-if [[ -f "$REPO_ROOT/.env.local" ]]; then
-  ok ".env.local already exists (skipping)"
-else
+AUTH_GENERATED=0
+if [[ ! -f "$REPO_ROOT/.env.local" ]]; then
   cp "$REPO_ROOT/.env.local.example" "$REPO_ROOT/.env.local"
   ok "Created .env.local from .env.local.example"
-  warn "OLLAMA_BASE_URL defaults to http://localhost:11434 — no changes needed for single-machine setup."
+else
+  ok ".env.local already exists"
 fi
 
-# ── 12. Summary ───────────────────────────────────────────────────────────────
+# Fill only blank auth keys. An existing hash or secret is left alone so a
+# re-run does not rotate the password. The bcrypt hash is single-quoted
+# because the loaders strip one pair of quotes and otherwise keep `$2b$…`.
+auth_status="$("$REASONING_PYTHON" - "$REPO_ROOT/.env.local" "$REPO_ROOT/scripts/hash_password.py" <<'PY'
+import secrets
+import subprocess
+import sys
+from pathlib import Path
+
+env_path = Path(sys.argv[1])
+hasher = Path(sys.argv[2])
+lines = env_path.read_text().splitlines()
+
+
+def parse(raw: str) -> str:
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    if " #" in value:
+        value = value.split(" #", 1)[0]
+    return value.strip()
+
+
+def find(key: str) -> tuple[int | None, str]:
+    prefix = f"{key}="
+    for index, line in enumerate(lines):
+        if line.startswith(prefix):
+            return index, parse(line.split("=", 1)[1])
+    return None, ""
+
+
+def put(index: int | None, key: str, rendered: str) -> None:
+    line = f"{key}={rendered}"
+    if index is None:
+        lines.append(line)
+    else:
+        lines[index] = line
+
+
+hash_index, hash_value = find("AUTH_PASSWORD_HASH")
+secret_index, secret_value = find("AUTH_JWT_SECRET")
+generated_hash = False
+filled_secret = False
+
+if not hash_value:
+    hashed = subprocess.check_output(
+        [sys.executable, str(hasher), "admin"],
+        text=True,
+    ).strip()
+    put(hash_index, "AUTH_PASSWORD_HASH", f"'{hashed}'")
+    generated_hash = True
+
+if not secret_value:
+    put(secret_index, "AUTH_JWT_SECRET", secrets.token_hex(32))
+    filled_secret = True
+
+if generated_hash or filled_secret:
+    env_path.write_text("\n".join(lines) + "\n")
+
+if generated_hash:
+    print("generated")
+elif filled_secret:
+    print("secret")
+else:
+    print("kept")
+PY
+)"
+
+case "$auth_status" in
+  generated)
+    AUTH_GENERATED=1
+    ok "Login credentials written — username admin, password admin"
+    ;;
+  secret)
+    ok "AUTH_JWT_SECRET was blank and has been written; existing password hash left unchanged"
+    ;;
+  kept)
+    ok "AUTH_PASSWORD_HASH and AUTH_JWT_SECRET already set (left unchanged)"
+    ;;
+  *)
+    fail "Unexpected auth setup result: ${auth_status}"
+    ;;
+esac
+
+# ── 13. OCR runtime ───────────────────────────────────────────────────────────
+header "OCR runtime"
+
+# The repository default stays device: mps / inference_backend: auto for Mac.
+# On this host, rewrite only the data_ingestion.ocr block of the working copy.
+USE_LLAMA_CPP=0
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+  ocr_backend=""
+  if docker info >/dev/null 2>&1; then
+    info "Docker is running — leaving inference_backend unchanged so vLLM can be used."
+  else
+    info "No Docker daemon — OCR recognition will use llama.cpp instead of vLLM."
+    ocr_backend="llama.cpp"
+    USE_LLAMA_CPP=1
+  fi
+
+  ocr_status="$(python3 - "$REPO_ROOT/config/app.yaml" "$ocr_backend" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+backend = sys.argv[2]
+lines = path.read_text().splitlines()
+
+start = next(
+    (index for index, line in enumerate(lines) if line == "  ocr:"),
+    None,
+)
+if start is None:
+    raise SystemExit("data_ingestion.ocr block not found in config/app.yaml")
+
+end = len(lines)
+for index in range(start + 1, len(lines)):
+    line = lines[index]
+    if line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":"):
+        end = index
+        break
+
+updates = {"device": "cuda"}
+if backend:
+    updates["inference_backend"] = backend
+
+changed = False
+for key, value in updates.items():
+    pattern = re.compile(rf"^(    {key}:\s*)(\S+)(.*)$")
+    found = False
+    for index in range(start, end):
+        match = pattern.match(lines[index])
+        if not match:
+            continue
+        found = True
+        if match.group(2) != value:
+            lines[index] = f"{match.group(1)}{value}{match.group(3)}"
+            changed = True
+        break
+    if not found:
+        raise SystemExit(f"{key} not found in the data_ingestion.ocr block")
+
+if changed:
+    path.write_text("\n".join(lines) + "\n")
+    print("updated")
+else:
+    print("unchanged")
+PY
+)"
+  case "$ocr_status" in
+    updated)
+      if [[ -n "$ocr_backend" ]]; then
+        ok "Set data_ingestion.ocr device=cuda and inference_backend=llama.cpp"
+      else
+        ok "Set data_ingestion.ocr device=cuda (inference_backend unchanged)"
+      fi
+      ;;
+    unchanged)
+      ok "data_ingestion.ocr already matches this host"
+      ;;
+    *)
+      fail "Unexpected OCR config result: ${ocr_status}"
+      ;;
+  esac
+else
+  warn "nvidia-smi unavailable — leaving config/app.yaml OCR settings unchanged."
+fi
+
+# ── 14. llama-server ──────────────────────────────────────────────────────────
+if [[ "$USE_LLAMA_CPP" -eq 1 ]]; then
+  header "llama-server (CUDA, built from source)"
+
+  existing_bin="$(command -v llama-server 2>/dev/null || true)"
+  if [[ -n "$existing_bin" ]] && llama_server_ok "$existing_bin"; then
+    ok "llama-server already usable: $("$existing_bin" --version 2>&1 | head -1)"
+  else
+    nvcc="/usr/local/cuda/bin/nvcc"
+    [[ -x "$nvcc" ]] || fail "CUDA toolkit compiler not found at /usr/local/cuda/bin/nvcc"
+
+    compute_cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '[:space:]')"
+    [[ -n "$compute_cap" ]] || fail "Could not read GPU compute capability from nvidia-smi"
+    cuda_arch="${compute_cap//./}"
+    info "Building llama.cpp b11429 for sm_${cuda_arch} with ${nvcc}"
+
+    if [[ -d /opt/llama.cpp && ! -d /opt/llama.cpp/.git ]]; then
+      warn "Removing incomplete /opt/llama.cpp"
+      rm -rf /opt/llama.cpp
+    fi
+    if [[ ! -d /opt/llama.cpp/.git ]]; then
+      git clone --depth 1 --branch b11429 \
+        https://github.com/ggml-org/llama.cpp.git /opt/llama.cpp
+    else
+      current_tag="$(git -C /opt/llama.cpp describe --tags --exact-match 2>/dev/null || true)"
+      if [[ "$current_tag" != "b11429" ]]; then
+        git -C /opt/llama.cpp fetch --depth 1 origin refs/tags/b11429:refs/tags/b11429
+        git -C /opt/llama.cpp checkout --detach refs/tags/b11429
+      fi
+    fi
+
+    export PATH="/usr/local/cuda/bin:${PATH}"
+    export CUDA_HOME="/usr/local/cuda"
+    export CUDAToolkit_ROOT="/usr/local/cuda"
+    build_jobs="$(nproc)"
+    if (( build_jobs > 8 )); then
+      build_jobs=8
+    fi
+    cmake -S /opt/llama.cpp -B /opt/llama.cpp/build \
+      -DGGML_CUDA=ON \
+      -DCMAKE_CUDA_ARCHITECTURES="${cuda_arch}" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CUDA_COMPILER="${nvcc}"
+    cmake --build /opt/llama.cpp/build -j "${build_jobs}" --target llama-server
+    ln -sfn /opt/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+    llama_server_ok /usr/local/bin/llama-server \
+      || fail "llama-server at /usr/local/bin/llama-server failed --version (refusing a glibc-mismatched binary)"
+    ok "llama-server $(/usr/local/bin/llama-server --version 2>&1 | head -1)"
+  fi
+fi
+
+# ── 15. Summary ───────────────────────────────────────────────────────────────
 header "Done"
 
 echo -e "${GREEN}${BOLD}All prerequisites installed.${NC}\n"
+if [[ "$AUTH_GENERATED" -eq 1 ]]; then
+  echo -e "  ${BOLD}Login:${NC} admin / admin"
+  echo ""
+fi
+if [[ "$USE_LLAMA_CPP" -eq 1 ]]; then
+  echo -e "  ${BOLD}OCR recognition:${NC} llama.cpp (llama-server on PATH)."
+  echo -e "  The first ingest still downloads the Surya GGUF from Hugging Face."
+  echo -e "  If ${CYAN}make dev${NC} is already running, restart it from the repo root."
+  echo -e "  Uvicorn reads config/app.yaml once and caches the OCR backend."
+  echo ""
+fi
 echo -e "  ${BOLD}Next steps:${NC}\n"
 echo -e "  1. ${CYAN}Start Neo4j + Qdrant:${NC}"
 echo -e "       make up"
