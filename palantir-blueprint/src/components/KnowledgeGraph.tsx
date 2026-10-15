@@ -163,7 +163,7 @@ export default function KnowledgeGraph({ onTrialClick, highlightedNct, nodes: pr
         </div>
         <div className="knowledge-graph-empty">
           <span style={{ fontFamily: "var(--text-mono)", fontSize: 11, color: "var(--text-dim)" }}>
-            No literature graph facts matched this query
+            No knowledge graph facts matched this query
           </span>
         </div>
       </div>
