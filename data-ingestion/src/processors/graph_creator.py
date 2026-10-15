@@ -749,6 +749,22 @@ class GraphCreator:
         )
         return deleted
 
+    def count_source_relationships(
+        self, source_file: str, scope: str = "literature"
+    ) -> int:
+        """Return relationships currently stored for one source scope."""
+        query = """
+        MATCH ()-[r]->()
+        WHERE r.source = $source AND r.scope = $scope
+        RETURN count(r) AS relationships
+        """
+        with self._driver.session() as session:
+            result = session.run(query, source=source_file, scope=scope)
+            record = result.single()
+        if not record or record.get("relationships") is None:
+            return 0
+        return int(record["relationships"])
+
     # ── pipeline entry-point ──────────────────────────────────────────────────
 
     def process_chunks_file(
@@ -757,7 +773,8 @@ class GraphCreator:
         """
         Process one ``*_chunks.json`` file and return relationships written.
 
-        A source is rebuilt after a manifest version/fingerprint mismatch or
+        A source is rebuilt after a manifest version/fingerprint mismatch,
+        when the manifest records triplets that are missing from Neo4j, or
         ``force=True``. Only its own relationships are purged before rebuilding.
         Failed extraction attempts remain unrecorded and are retried next run.
         A successful empty response is explicitly recorded as a zero-triplet
@@ -789,9 +806,20 @@ class GraphCreator:
             or existing.get("fingerprint") != fingerprint
             or existing.get("scope") != scope
         )
+        missing_graph = False
+        if not stale and int(existing.get("triplet_count") or 0) > 0:
+            if self.count_source_relationships(file_key, scope) == 0:
+                missing_graph = True
+                stale = True
         if stale:
             reason = (
-                "legacy" if legacy_manifest else "force" if force else "fingerprint"
+                "legacy"
+                if legacy_manifest
+                else "force"
+                if force
+                else "missing_graph"
+                if missing_graph
+                else "fingerprint"
             )
             logger.info(
                 "event=kg_source_rebuild source=%s scope=%s reason=%s",

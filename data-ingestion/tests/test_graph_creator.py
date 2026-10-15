@@ -20,6 +20,7 @@ from src.processors.graph_creator import GraphCreator
 class _FakeSession:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
+        self.relationship_count = 0
 
     def __enter__(self) -> "_FakeSession":
         return self
@@ -30,7 +31,10 @@ class _FakeSession:
     def run(self, query: str, **params: object) -> MagicMock:
         self.calls.append((query, params))
         result = MagicMock()
-        result.single.return_value = {"deleted": 2}
+        if "AS relationships" in query:
+            result.single.return_value = {"relationships": self.relationship_count}
+        else:
+            result.single.return_value = {"deleted": 2}
         return result
 
 
@@ -259,6 +263,74 @@ def test_legacy_and_fingerprint_changes_purge_before_rebuild(
     assert creator.process_chunks_file(chunks_file) == 0
     assert creator.purge_source.call_count == 2
     assert creator.extract_triplets.call_count == 2
+
+
+def _completed_manifest(creator: GraphCreator, chunks_file: Path, triplet_count: int) -> None:
+    data = json.loads(chunks_file.read_text(encoding="utf-8"))
+    manifest = {
+        "version": 2,
+        "documents": {
+            chunks_file.stem: {
+                "fingerprint": creator._document_fingerprint(data),
+                "scope": "literature",
+                "processed_chunks": [0],
+                "zero_triplet_chunks": [],
+                "triplet_count": triplet_count,
+                "complete": True,
+            }
+        },
+    }
+    (chunks_file.parent / ".kg_progress.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+
+
+def test_missing_graph_rebuilds_completed_source(
+    creator: GraphCreator, artifact_dir: Path
+) -> None:
+    chunks_file = _write_chunks(artifact_dir)
+    _completed_manifest(creator, chunks_file, triplet_count=4)
+    creator._driver.session_instance.relationship_count = 0
+    creator.extract_triplets = MagicMock(
+        return_value=[{"head": "A", "relation": "TREATS", "tail": "B", "tier": 1}]
+    )
+    creator.write_triplets = MagicMock(return_value=1)
+
+    assert creator.process_chunks_file(chunks_file) == 1
+
+    count_query, count_params = creator._driver.session_instance.calls[0]
+    assert "RETURN count(r) AS relationships" in count_query
+    assert count_params == {"source": "sample_chunks", "scope": "literature"}
+    purge_query, _ = creator._driver.session_instance.calls[1]
+    assert "DELETE r" in purge_query
+    creator.extract_triplets.assert_called_once()
+    manifest = json.loads((artifact_dir / ".kg_progress.json").read_text())
+    assert manifest["documents"]["sample_chunks"]["triplet_count"] == 1
+
+
+def test_completed_source_with_stored_relationships_is_not_reextracted(
+    creator: GraphCreator, artifact_dir: Path
+) -> None:
+    chunks_file = _write_chunks(artifact_dir)
+    _completed_manifest(creator, chunks_file, triplet_count=4)
+    creator._driver.session_instance.relationship_count = 4
+    creator.extract_triplets = MagicMock(return_value=[])
+
+    assert creator.process_chunks_file(chunks_file) == 0
+    creator.extract_triplets.assert_not_called()
+
+
+def test_zero_triplet_source_is_not_rebuilt_when_graph_is_empty(
+    creator: GraphCreator, artifact_dir: Path
+) -> None:
+    chunks_file = _write_chunks(artifact_dir)
+    _completed_manifest(creator, chunks_file, triplet_count=0)
+    creator._driver.session_instance.relationship_count = 0
+    creator.extract_triplets = MagicMock(return_value=[])
+
+    assert creator.process_chunks_file(chunks_file) == 0
+    creator.extract_triplets.assert_not_called()
+    assert creator._driver.session_instance.calls == []
 
 
 def test_relationships_are_source_scoped_and_purge_preserves_entities(
