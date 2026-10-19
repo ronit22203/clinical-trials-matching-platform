@@ -11,9 +11,7 @@ also a space heater that occasionally outputs a JSON file
 ![Compliance: HIPAA Aligned](https://img.shields.io/badge/Compliance-HIPAA--Aligned-green)
 ---
 
-![Healthcare platform production UI dashboard showing clinical search interface with patient record, clinical summary results, OCR debug visualization, identified medical terms, and knowledge graph visualization with nodes and edges representing medical entities and relationships](docs_v2/assets/production_ui.png)
-
-![Production UI walkthrough](docs_v2/assets/production-demo.mp4)
+https://github.com/user-attachments/assets/f4dd970b-4de6-4a6c-9e50-d3c7d2aaed4c
 
 ---
 
