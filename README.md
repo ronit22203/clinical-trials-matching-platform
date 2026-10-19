@@ -13,9 +13,11 @@ also a space heater that occasionally outputs a JSON file
 
 ![Healthcare platform production UI dashboard showing clinical search interface with patient record, clinical summary results, OCR debug visualization, identified medical terms, and knowledge graph visualization with nodes and edges representing medical entities and relationships](docs_v2/assets/production_ui.png)
 
+![Production UI walkthrough](docs_v2/assets/production-demo.mp4)
+
 ---
 
-watch the legacy ui [demo video](https://www.ronitsaxena.in/projects/clinical-trial-matching-api/) or read on for setup instructions, architecture overview, and troubleshooting tips.
+The clip above is the production UI. The legacy UI [demo video](https://www.ronitsaxena.in/projects/clinical-trial-matching-api/) is still up, or read on for setup instructions, architecture overview, and troubleshooting tips.
 
 ---
 
