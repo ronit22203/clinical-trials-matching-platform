@@ -1,0 +1,133 @@
+{
+  "title": "Language Model",
+  "uid": "platform-llm",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request duration (p50 / p95)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "color": { "mode": "palette-classic" } }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, provider, model, mode) (rate(llm_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{provider}}/{{model}} {{mode}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, provider, model, mode) (rate(llm_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{provider}}/{{model}} {{mode}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Requests / second by status",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "color": { "mode": "palette-classic" } }
+      },
+      "targets": [
+        {
+          "expr": "sum by (provider, model, status) (rate(llm_requests_total[5m]))",
+          "legendFormat": "{{provider}}/{{model}} {{status}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Tokens / second",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "color": { "mode": "palette-classic" } }
+      },
+      "targets": [
+        {
+          "expr": "sum by (provider, model, direction) (rate(llm_tokens_total[5m]))",
+          "legendFormat": "{{provider}}/{{model}} {{direction}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Benchmark TTFT (Pushgateway)",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "color": { "mode": "palette-classic" } }
+      },
+      "targets": [
+        {
+          "expr": "ollama_benchmark_ttft_ms",
+          "legendFormat": "Q{{query_id}} {{category}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Benchmark TPS (Pushgateway)",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "color": { "mode": "palette-classic" } }
+      },
+      "targets": [
+        {
+          "expr": "ollama_benchmark_tps",
+          "legendFormat": "Q{{query_id}} {{category}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Benchmark MBU % (Pushgateway)",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "targets": [
+        {
+          "expr": "ollama_benchmark_mbu_pct",
+          "legendFormat": "Q{{query_id}} {{category}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0
+      }
+    ]
+  }
+}

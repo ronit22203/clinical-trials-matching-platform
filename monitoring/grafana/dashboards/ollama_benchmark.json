@@ -1,0 +1,217 @@
+{
+  "title": "Ollama Benchmark",
+  "uid": "ollama-benchmark",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "TTFT — Time to First Token (ms)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "color": { "mode": "palette-classic" } }
+      },
+      "targets": [
+        {
+          "expr": "ollama_benchmark_ttft_ms",
+          "legendFormat": "Q{{query_id}} {{category}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "TPS — Output Tokens / Second",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "color": { "mode": "palette-classic" } }
+      },
+      "targets": [
+        {
+          "expr": "ollama_benchmark_tps",
+          "legendFormat": "Q{{query_id}} {{category}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "TPOT — Time Per Output Token (ms/tok)",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "color": { "mode": "palette-classic" } }
+      },
+      "targets": [
+        {
+          "expr": "ollama_benchmark_tpot_ms",
+          "legendFormat": "Q{{query_id}} {{category}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "MBU — Model Bandwidth Utilization (%)",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 85 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "ollama_benchmark_mbu_pct",
+          "legendFormat": "Q{{query_id}} {{category}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Unified Memory Used (GB)",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "decgbytes", "color": { "mode": "palette-classic" } }
+      },
+      "targets": [
+        {
+          "expr": "ollama_benchmark_mem_used_gb",
+          "legendFormat": "used — Q{{query_id}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        },
+        {
+          "expr": "ollama_benchmark_mem_free_gb",
+          "legendFormat": "free — Q{{query_id}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Token Counts",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "palette-classic" } }
+      },
+      "targets": [
+        {
+          "expr": "ollama_benchmark_output_tokens",
+          "legendFormat": "output — Q{{query_id}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        },
+        {
+          "expr": "ollama_benchmark_prompt_tokens",
+          "legendFormat": "prompt — Q{{query_id}}",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Avg TPS",
+      "gridPos": { "x": 0, "y": 24, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [
+        {
+          "expr": "avg(ollama_benchmark_tps)",
+          "legendFormat": "",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Avg TTFT",
+      "gridPos": { "x": 6, "y": 24, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [
+        {
+          "expr": "avg(ollama_benchmark_ttft_ms)",
+          "legendFormat": "",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Avg MBU",
+      "gridPos": { "x": 12, "y": 24, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "percent" } },
+      "targets": [
+        {
+          "expr": "avg(ollama_benchmark_mbu_pct)",
+          "legendFormat": "",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Avg TPOT",
+      "gridPos": { "x": 18, "y": 24, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "ms" } },
+      "targets": [
+        {
+          "expr": "avg(ollama_benchmark_tpot_ms)",
+          "legendFormat": "",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" }
+        }
+      ],
+      "datasource": { "type": "prometheus", "uid": "${datasource}" }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0
+      },
+      {
+        "name": "model",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(ollama_benchmark_tps, model)",
+        "label": "Model",
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" },
+        "hide": 0
+      }
+    ]
+  }
+}

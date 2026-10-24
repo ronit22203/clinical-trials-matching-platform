@@ -459,11 +459,20 @@ class Agent:
                 fallback_used=False,
             )
 
+        from .monitoring.metrics import observe_llm_request, timed_seconds
+
         messages = self._build_messages(query, evidence)
         llm, model, fallback_used = self._select_synthesis_llm()
+        started = timed_seconds()
         try:
             response = llm.invoke(messages)
         except _PROVIDER_ERRORS as exc:
+            observe_llm_request(
+                model=model,
+                duration_seconds=timed_seconds() - started,
+                status="error",
+                mode="invoke",
+            )
             if fallback_used or not self.config.fallback_model or self.fallback_llm is None:
                 raise LLMUnavailableError(
                     f"Synthesis invocation failed for {model}: {type(exc).__name__}: {exc}"
@@ -488,14 +497,28 @@ class Agent:
                 fallback_model,
                 type(exc).__name__,
             )
+            fallback_started = timed_seconds()
             try:
                 response = self.fallback_llm.invoke(messages)
             except _PROVIDER_ERRORS as fallback_exc:
+                observe_llm_request(
+                    model=fallback_model,
+                    duration_seconds=timed_seconds() - fallback_started,
+                    status="error",
+                    mode="invoke",
+                )
                 raise LLMUnavailableError(
                     f"Synthesis invocation failed for fallback {fallback_model}: "
                     f"{type(fallback_exc).__name__}: {fallback_exc}"
                 ) from fallback_exc
             fallback_text = _strip_reasoning_block(str(response.content or "")).strip()
+            observe_llm_request(
+                model=fallback_model,
+                duration_seconds=timed_seconds() - fallback_started,
+                status="ok",
+                mode="invoke",
+                completion_tokens=max(1, len(fallback_text) // _TOKEN_ESTIMATE_BYTES_PER_TOKEN),
+            )
             return SynthesisResult(
                 text=fallback_text or _NO_EVIDENCE_RESPONSE,
                 model=fallback_model,
@@ -503,6 +526,13 @@ class Agent:
             )
 
         response_text = _strip_reasoning_block(str(response.content or "")).strip()
+        observe_llm_request(
+            model=model,
+            duration_seconds=timed_seconds() - started,
+            status="ok",
+            mode="invoke",
+            completion_tokens=max(1, len(response_text) // _TOKEN_ESTIMATE_BYTES_PER_TOKEN),
+        )
         return SynthesisResult(
             text=response_text or _NO_EVIDENCE_RESPONSE,
             model=model,
@@ -516,13 +546,33 @@ class Agent:
         model: str,
         fallback_used: bool,
     ) -> Iterator[SynthesisStreamEvent]:
+        from .monitoring.metrics import observe_llm_request, timed_seconds
+
         emitted_token = False
+        completion_chars = 0
+        started = timed_seconds()
         try:
             for token in _visible_stream_tokens(llm.stream(messages)):
                 emitted_token = True
+                completion_chars += len(token)
                 yield SynthesisStreamEvent(type="token", text=token)
+            observe_llm_request(
+                model=model,
+                duration_seconds=timed_seconds() - started,
+                status="ok",
+                mode="stream",
+                completion_tokens=max(
+                    1, completion_chars // _TOKEN_ESTIMATE_BYTES_PER_TOKEN
+                ),
+            )
             return
         except _PROVIDER_ERRORS as exc:
+            observe_llm_request(
+                model=model,
+                duration_seconds=timed_seconds() - started,
+                status="error",
+                mode="stream",
+            )
             fallback_model = self.config.fallback_model
             if (
                 emitted_token
@@ -558,10 +608,28 @@ class Agent:
                 fallback_used=True,
             )
 
+            fallback_started = timed_seconds()
+            fallback_chars = 0
             try:
                 for token in _visible_stream_tokens(self.fallback_llm.stream(messages)):
+                    fallback_chars += len(token)
                     yield SynthesisStreamEvent(type="token", text=token)
+                observe_llm_request(
+                    model=fallback_model,
+                    duration_seconds=timed_seconds() - fallback_started,
+                    status="ok",
+                    mode="stream",
+                    completion_tokens=max(
+                        1, fallback_chars // _TOKEN_ESTIMATE_BYTES_PER_TOKEN
+                    ),
+                )
             except _PROVIDER_ERRORS as fallback_exc:
+                observe_llm_request(
+                    model=fallback_model,
+                    duration_seconds=timed_seconds() - fallback_started,
+                    status="error",
+                    mode="stream",
+                )
                 raise LLMUnavailableError(
                     f"Synthesis stream failed for fallback {fallback_model}: "
                     f"{type(fallback_exc).__name__}: {fallback_exc}"

@@ -152,6 +152,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+try:
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+    from fastapi.responses import Response as _MetricsResponse
+
+    @app.get("/metrics", include_in_schema=False)
+    def _prometheus_metrics() -> _MetricsResponse:
+        return _MetricsResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+except ImportError:
+    log.warning("prometheus_client not installed — /metrics disabled")
+
 # ── SSE helpers ───────────────────────────────────────────────────────────────
 
 def _sse_line(event: dict) -> bytes:
@@ -207,7 +217,7 @@ def _run_pipeline(pdf_path: Path, slug: str, queue: asyncio.Queue, loop: asyncio
             max_pages=ocr_cfg.get("max_pages"),
         )
         emit("ocr", "running", f"Running OCR on {len(images)} page(s)…")
-        results = run_ocr(images, predictors["recognition"])
+        results = run_ocr(images, predictors["recognition"], backend=backend)
 
         json_output   = serialize_surya_results(results)
         ocr_json_path = OCR_DIR / f"{slug}_ocr.json"

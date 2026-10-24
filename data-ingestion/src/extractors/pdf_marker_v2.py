@@ -118,11 +118,40 @@ def load_pdf_images(pdf_path, image_scale: float | None = None, max_pages: int |
     return images
 
 
-def run_ocr(images, predictor):
+def run_ocr(images, predictor, *, backend: str | None = None):
     """Run block-level recognition. ``predictor`` is a RecognitionPredictor."""
     if not images:
         return []
-    return predictor(images)
+
+    from src.monitoring.metrics import observe_ocr, timed_seconds
+
+    label = backend or os.environ.get("SURYA_INFERENCE_BACKEND") or "auto"
+    started = timed_seconds()
+    try:
+        results = predictor(images)
+    except Exception:
+        observe_ocr(
+            backend=label,
+            pages=len(images),
+            duration_seconds=timed_seconds() - started,
+            error=True,
+        )
+        raise
+
+    confidences: list[float] = []
+    for result in results:
+        page = _page_dict(result, 1)
+        for block in page["blocks"]:
+            if block["confidence"] is not None:
+                confidences.append(float(block["confidence"]))
+
+    observe_ocr(
+        backend=label,
+        pages=len(images),
+        duration_seconds=timed_seconds() - started,
+        confidences=confidences,
+    )
+    return results
 
 
 def _block_dict(block, index: int) -> dict:

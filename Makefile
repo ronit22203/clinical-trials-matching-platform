@@ -80,6 +80,7 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 
 .PHONY: help \
 	bootstrap validate up down serve fetch ingest \
+	monitoring-up monitoring-down \
 	status metrics benchmark-sepsis \
 	benchmark-all benchmark-retrieval benchmark-extraction benchmark-inference benchmark-reasoning benchmark-report \
 	deterministic-run _det-ingest-timed _det-graph-timed _det-finalize \
@@ -125,6 +126,15 @@ status: ## Show running containers and data artifact counts
 
 metrics: ## Dump every live metric to the CLI (services, artifacts, Qdrant, Neo4j, inference, latest bench)
 	@python3 scripts/dev_metrics.py
+
+monitoring-up: ## Start Prometheus, Pushgateway, and Grafana (monitoring/)
+	@docker compose -f monitoring/docker-compose.yml up -d
+	@printf "$(GREEN)Grafana$(NC)     http://localhost:3000  (admin/admin)\n"
+	@printf "$(GREEN)Prometheus$(NC)  http://localhost:9090\n"
+	@printf "$(GREEN)Pushgateway$(NC) http://localhost:9091\n"
+
+monitoring-down: ## Stop the platform monitoring stack
+	@docker compose -f monitoring/docker-compose.yml down
 
 bootstrap: ## Bootstrap Python and Node dependencies
 	@./scripts/bootstrap.sh

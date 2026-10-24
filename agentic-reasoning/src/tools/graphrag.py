@@ -188,7 +188,15 @@ class GraphRAGTool(BaseTool):
     ) -> list[dict]:
         from qdrant_client.http.models import FieldCondition, Filter, MatchValue
 
+        from ..monitoring.metrics import (
+            observe_embed_query,
+            observe_qdrant_query,
+            timed_seconds,
+        )
+
+        embed_started = timed_seconds()
         encoded_query = self._embedder_model().encode(query)
+        observe_embed_query(timed_seconds() - embed_started)
         query_vector = (
             encoded_query.tolist()
             if hasattr(encoded_query, "tolist")
@@ -215,12 +223,17 @@ class GraphRAGTool(BaseTool):
                 )
             )
 
+        query_started = timed_seconds()
         hits = client.query_points(
             collection_name=collection,
             query=query_vector,
             limit=fetch_limit,
             query_filter=Filter(must=conditions),
         ).points
+        observe_qdrant_query(
+            collection=collection,
+            duration_seconds=timed_seconds() - query_started,
+        )
         results: list[dict] = []
         for hit in hits:
             payload = hit.payload or {}
@@ -263,6 +276,9 @@ class GraphRAGTool(BaseTool):
             RETURN h.name AS head, type(r) AS relation, t.name AS tail
             LIMIT $limit
         """
+        from ..monitoring.metrics import observe_neo4j_query, timed_seconds
+
+        neo4j_started = timed_seconds()
         try:
             with self._neo4j_driver().session() as session:
                 records = list(
@@ -275,12 +291,14 @@ class GraphRAGTool(BaseTool):
                     )
                 )
         except (Neo4jError, ConnectionError, OSError, TimeoutError) as exc:
+            observe_neo4j_query(timed_seconds() - neo4j_started)
             logger.warning(
                 "Neo4j enrichment unavailable: target=%s error=%s",
                 target["name"],
                 type(exc).__name__,
             )
             return []
+        observe_neo4j_query(timed_seconds() - neo4j_started)
         return [f"{record['head']} --[{record['relation']}]--> {record['tail']}" for record in records]
 
     def _parse_request(
@@ -393,8 +411,12 @@ class GraphRAGTool(BaseTool):
         ]
 
         if reranker is not None and candidates:
+            from ..monitoring.metrics import observe_rerank, timed_seconds
+
             pairs = [(semantic_query, candidate["content"]) for candidate in candidates]
+            rerank_started = timed_seconds()
             predicted_scores = reranker.predict(pairs)
+            observe_rerank(timed_seconds() - rerank_started)
             scores = (
                 predicted_scores.tolist()
                 if hasattr(predicted_scores, "tolist")

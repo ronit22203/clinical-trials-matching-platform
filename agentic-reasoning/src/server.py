@@ -52,6 +52,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+try:
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+    from fastapi.responses import Response as _MetricsResponse
+
+    @app.get("/metrics", include_in_schema=False)
+    def _prometheus_metrics() -> _MetricsResponse:
+        return _MetricsResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+except ImportError:
+    logger.warning("prometheus_client not installed — /metrics disabled")
+
 # ── Agent singleton (lazy-init, expensive models load once) ───────────────────
 
 _agent: Any = None

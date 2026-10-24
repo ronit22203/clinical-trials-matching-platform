@@ -192,7 +192,14 @@ class MedicalVectorizer:
             )
             return 0
 
+        from src.monitoring.metrics import (
+            observe_embed_encode,
+            observe_qdrant_upsert,
+            timed_seconds,
+        )
+
         contents = [chunk["content"] for _, chunk in indexable_chunks]
+        encode_started = timed_seconds()
         embeddings: Any = self.embedding_model.encode(
             contents,
             normalize_embeddings=self._normalize_embeddings,
@@ -203,6 +210,10 @@ class MedicalVectorizer:
             raise ValueError(
                 f"Embedding model returned an unexpected result for {artifact_path.name}"
             )
+        observe_embed_encode(
+            vectors=len(embeddings),
+            duration_seconds=timed_seconds() - encode_started,
+        )
 
         points: list[PointStruct] = []
         for (chunk_index, chunk), embedding in zip(indexable_chunks, embeddings):
@@ -233,7 +244,13 @@ class MedicalVectorizer:
             collection_name=collection_name, source=source, scope=scope
         )
         for batch in _batched(points, self._batch_size):
+            upsert_started = timed_seconds()
             self.client.upsert(collection_name=collection_name, points=batch)
+            observe_qdrant_upsert(
+                collection=collection_name,
+                points=len(batch),
+                duration_seconds=timed_seconds() - upsert_started,
+            )
 
         log.info(
             "Indexed chunks=%s source=%s scope=%s collection=%s",
