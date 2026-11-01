@@ -6,7 +6,7 @@ Runs every golden query through the two-phase Agent pipeline:
   Phase 2: Grounded LLM synthesis
 
 Captures per-query: found flag, latency (end-to-end + phase-1 only),
-vector hits, graph facts count, synthesis length.
+vector hits, graph facts count, the full synthesis, and synthesis length.
 
 Aggregate: found_rate, latency percentiles, mean evidence density.
 
@@ -80,13 +80,15 @@ def _run_query(agent, query_text: str) -> dict[str, Any]:
         vector_hits = len(evidence.get("vector_results", []))
         graph_facts = len(evidence.get("graph_facts", []))
 
+        synthesis = result.synthesis or ""
         return {
             "found": result.found,
             "latency_ms": round(latency_ms, 1),
             "vector_hits": vector_hits,
             "graph_facts": graph_facts,
-            "synthesis_len": len(result.synthesis),
-            "synthesis_snippet": result.synthesis[:200] if result.synthesis else "",
+            "synthesis": synthesis,
+            "synthesis_len": len(synthesis),
+            "synthesis_snippet": synthesis[:200],
             "error": None,
         }
     except Exception as exc:
@@ -97,6 +99,7 @@ def _run_query(agent, query_text: str) -> dict[str, Any]:
             "latency_ms": round(latency_ms, 1),
             "vector_hits": 0,
             "graph_facts": 0,
+            "synthesis": "",
             "synthesis_len": 0,
             "synthesis_snippet": "",
             "error": str(exc),
