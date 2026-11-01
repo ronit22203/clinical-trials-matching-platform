@@ -82,7 +82,8 @@ FETCHER_SCRIPT = $(if $(filter clinical_trials,$(SOURCE)),clinical_trials_pdf.py
 	bootstrap validate up down serve fetch ingest \
 	monitoring-up monitoring-down \
 	status metrics benchmark-sepsis \
-	benchmark-all benchmark-retrieval benchmark-extraction benchmark-inference benchmark-reasoning benchmark-report \
+	benchmark-all benchmark-retrieval benchmark-extraction benchmark-inference benchmark-reasoning benchmark-answers benchmark-report \
+	golden-answers \
 	deterministic-run _det-ingest-timed _det-graph-timed _det-finalize \
 	clean clean-all clean-artifacts clean-ocr clean-md clean-chunks clean-vectors clean-graph clean-hard \
 	dev ollama-ready auth-setup \
@@ -280,6 +281,7 @@ benchmark-all: ## Run the full evaluation harness and generate report (RUN_DIR a
 	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-extraction RUN_DIR="$(RUN_DIR)"
 	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-inference RUN_DIR="$(RUN_DIR)"
 	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-reasoning RUN_DIR="$(RUN_DIR)"
+	@BENCH_RUN_ID="bench_$(RUN_DATE)_$(RUN_HASH)" $(MAKE) --no-print-directory benchmark-answers RUN_DIR="$(RUN_DIR)"
 	@$(MAKE) --no-print-directory benchmark-report RUN_DIR="$(RUN_DIR)"
 	@printf "$(GREEN)$(BOLD)Full benchmark complete → $(RUN_DIR)/report.md$(NC)\n"
 
@@ -326,6 +328,25 @@ benchmark-reasoning: ## Run agent reasoning evaluation (two-phase pipeline, 20 g
 		--output "../$(RUN_DIR)/reasoning.json" \
 		--config "../config/app.yaml"
 
+golden-answers: ## Generate one-time gpt-6.1-sol reference answers from the sepsis PDF
+	@test -x "$(CURDIR)/$(INGESTION_DIR)/.venv/bin/python" || { \
+		printf "$(RED)FAIL: ingestion venv missing. Run make ingestion-install$(NC)\n"; exit 1; }
+	@printf "$(CYAN)Generating golden answers from $(BENCH_PDF) …$(NC)\n"
+	@"$(CURDIR)/$(INGESTION_DIR)/.venv/bin/python" \
+		"$(CURDIR)/$(BENCHMARKING_DIR)/evaluators/generate_golden_answers.py" \
+		--pdf "$(CURDIR)/$(BENCH_PDF)" \
+		--queries "$(CURDIR)/$(BENCHMARKING_DIR)/golden/queries.json" \
+		--output "$(CURDIR)/$(BENCHMARKING_DIR)/golden/golden_answers.json"
+
+benchmark-answers: ## Judge local agent answers against golden/golden_answers.json
+	@printf "$(CYAN)Running answer-quality judge …$(NC)\n"
+	@mkdir -p "$(RUN_DIR)"
+	@cd $(BENCHMARKING_DIR) && BENCH_RUN_ID="$${BENCH_RUN_ID:-bench_$(RUN_DATE)_$(RUN_HASH)}" \
+		$(BENCH_PYTHON) evaluators/answer_evaluator.py \
+		--golden golden/golden_answers.json \
+		--reasoning "../$(RUN_DIR)/reasoning.json" \
+		--output "../$(RUN_DIR)/answer_quality.json"
+
 benchmark-report: ## Generate Markdown report from a completed run dir (RUN_DIR=...)
 	@test -n "$(RUN_DIR)" || { printf "$(RED)FAIL: RUN_DIR is required$(NC)\n"; exit 1; }
 	@printf "$(CYAN)Generating report → $(RUN_DIR)/report.md$(NC)\n"
@@ -348,7 +369,8 @@ benchmark-report: ## Generate Markdown report from a completed run dir (RUN_DIR=
 #     7  Extraction — entity/relation F1 (exact + relaxed) vs Neo4j
 #     8  Inference  — TTFT, TPOT, throughput across $(BENCH_RUNS) independent runs
 #     9  Reasoning  — two-phase agent evaluation (found rate, latency, evidence density)
-#    10  Finalize   — merge all stage JSONs → single manifest.json + report.md
+#    10  Answers    — judge local syntheses against golden/golden_answers.json
+#    11  Finalize   — merge all stage JSONs → single manifest.json + report.md
 #
 #   Override the golden PDF:  make deterministic-run BENCH_PDF=data/pdfs/my.pdf
 #   Override inference runs:  make deterministic-run BENCH_RUNS=5
@@ -359,30 +381,33 @@ deterministic-run: ## ★ Full deterministic pipeline → single manifest.json (
 	@printf "$(BOLD)$(BLUE)  PDF: $(BENCH_PDF)$(NC)\n"
 	@printf "$(BOLD)$(BLUE)═══════════════════════════════════════════════════════════$(NC)\n\n"
 	@mkdir -p "$(DET_RUN_DIR)"
-	@printf "$(CYAN) 1/10$(NC) Preflight: validating services …\n"
+	@printf "$(CYAN) 1/11$(NC) Preflight: validating services …\n"
 	@$(MAKE) --no-print-directory validate
-	@printf "\n$(CYAN) 2/10$(NC) Reset: wiping artifacts, vectors, graph …\n"
+	@printf "\n$(CYAN) 2/11$(NC) Reset: wiping artifacts, vectors, graph …\n"
 	@$(MAKE) --no-print-directory clean-artifacts
 	@$(MAKE) --no-print-directory clean-vectors
 	@$(MAKE) --no-print-directory clean-graph
-	@printf "\n$(CYAN) 3/10$(NC) Ingest: OCR → Markdown → clean → chunk → embed …\n"
+	@printf "\n$(CYAN) 3/11$(NC) Ingest: OCR → Markdown → clean → chunk → embed …\n"
 	@$(MAKE) --no-print-directory _det-ingest-timed DET_RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 4/10$(NC) Graph: building Neo4j knowledge graph …\n"
+	@printf "\n$(CYAN) 4/11$(NC) Graph: building Neo4j knowledge graph …\n"
 	@$(MAKE) --no-print-directory _det-graph-timed DET_RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 5/10$(NC) Provenance: capturing git, config, model, data hashes …\n"
+	@printf "\n$(CYAN) 5/11$(NC) Provenance: capturing git, config, model, data hashes …\n"
 	@BENCH_RUN_ID="$(DET_RUN_ID)" \
 	 $(MAKE) --no-print-directory benchmark-provenance RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 6/10$(NC) Retrieval: Recall@K, NDCG, MRR, HitRate (bootstrap CIs) …\n"
+	@printf "\n$(CYAN) 6/11$(NC) Retrieval: Recall@K, NDCG, MRR, HitRate (bootstrap CIs) …\n"
 	@$(MAKE) --no-print-directory benchmark-retrieval RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 7/10$(NC) Extraction: entity/relation F1 vs Neo4j …\n"
+	@printf "\n$(CYAN) 7/11$(NC) Extraction: entity/relation F1 vs Neo4j …\n"
 	@$(MAKE) --no-print-directory benchmark-extraction RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 8/10$(NC) Inference: TTFT/TPOT/throughput ($(BENCH_RUNS) runs × 20 queries) …\n"
+	@printf "\n$(CYAN) 8/11$(NC) Inference: TTFT/TPOT/throughput ($(BENCH_RUNS) runs × 20 queries) …\n"
 	@BENCH_RUN_ID="$(DET_RUN_ID)" \
 	 $(MAKE) --no-print-directory benchmark-inference RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN) 9/10$(NC) Reasoning: two-phase agent evaluation (20 queries) …\n"
+	@printf "\n$(CYAN) 9/11$(NC) Reasoning: two-phase agent evaluation (20 queries) …\n"
 	@BENCH_RUN_ID="$(DET_RUN_ID)" \
 	 $(MAKE) --no-print-directory benchmark-reasoning RUN_DIR="$(DET_RUN_DIR)"
-	@printf "\n$(CYAN)10/10$(NC) Finalize: merging stage outputs → manifest.json + report …\n"
+	@printf "\n$(CYAN)10/11$(NC) Answers: judging local syntheses against the OpenAI answer key …\n"
+	@BENCH_RUN_ID="$(DET_RUN_ID)" \
+	 $(MAKE) --no-print-directory benchmark-answers RUN_DIR="$(DET_RUN_DIR)"
+	@printf "\n$(CYAN)11/11$(NC) Finalize: merging stage outputs → manifest.json + report …\n"
 	@$(MAKE) --no-print-directory _det-finalize DET_RUN_DIR="$(DET_RUN_DIR)"
 	@$(MAKE) --no-print-directory benchmark-report RUN_DIR="$(DET_RUN_DIR)"
 	@printf "\n$(GREEN)$(BOLD)✓ Deterministic run complete$(NC)\n"

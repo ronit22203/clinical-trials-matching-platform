@@ -1,8 +1,8 @@
 """
 reporter.py — Generates BENCHMARK_<date>.md from a completed run directory.
 
-Aggregates manifest.json, retrieval.json, extraction.json, inference.json
-into a reproducible, human-readable Markdown report.
+Aggregates manifest.json, retrieval.json, extraction.json, inference.json,
+reasoning.json, and answer_quality.json into a Markdown report.
 
 Usage:
     python reporter.py --run-dir results/<RUN_DIR> [--output report.md]
@@ -54,6 +54,7 @@ def generate_report(run_dir: Path) -> str:
     extraction = _read_json(run_dir / "extraction.json")
     inference = _read_json(run_dir / "inference.json")
     reasoning = _read_json(run_dir / "reasoning.json")
+    answers = _read_json(run_dir / "answer_quality.json")
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     git_commit = (manifest or {}).get("git_commit", "unknown")[:8]
@@ -304,6 +305,44 @@ def generate_report(run_dir: Path) -> str:
                 )
             lines.append("")
 
+        lines.append("---")
+        lines.append("")
+
+    # ── Answer quality ────────────────────────────────────────────────────────
+    if answers:
+        lines.append("## Answer Quality")
+        lines.append("")
+        if answers.get("skipped"):
+            lines.append(f"Skipped: {answers.get('reason', 'answer key or API key unavailable')}")
+            lines.append("")
+        else:
+            agg = answers.get("aggregate", {})
+            cfg = answers.get("config", {})
+            lines.append(
+                f"{agg.get('queries', '?')} queries judged by `{cfg.get('model', '?')}` "
+                f"against golden answers from `{cfg.get('generator_model', 'n/a')}`"
+            )
+            lines.append("")
+            lines.append("| Metric | Mean (1–5) |")
+            lines.append("|--------|------------|")
+            lines.append(f"| Correctness | {agg.get('correctness', 'N/A')} |")
+            lines.append(f"| Factual depth | {agg.get('factual_depth', 'N/A')} |")
+            lines.append(f"| Entity coverage | {agg.get('entity_coverage', 'N/A')} |")
+            lines.append(f"| Overall | {agg.get('overall', 'N/A')} |")
+            lines.append("")
+            per_query = answers.get("per_query", [])
+            if per_query:
+                lines.append("| ID | Correctness | Depth | Entities | Overall |")
+                lines.append("|----|-------------|-------|----------|---------|")
+                for row in per_query:
+                    lines.append(
+                        f"| `{row.get('query_id', '?')}` "
+                        f"| {row.get('correctness', 'N/A')} "
+                        f"| {row.get('factual_depth', 'N/A')} "
+                        f"| {row.get('entity_coverage', 'N/A')} "
+                        f"| {row.get('overall', 'N/A')} |"
+                    )
+                lines.append("")
         lines.append("---")
         lines.append("")
 

@@ -8,6 +8,8 @@ Reads from run_dir:
   retrieval.json        - Recall@K, NDCG, MRR, HitRate + bootstrap CIs
   extraction.json       - entity/relation F1 (exact + relaxed)
   inference.json        - TTFT, TPOT, throughput across N runs
+  reasoning.json        - agent found-rate, latency, evidence density
+  answer_quality.json   - judge scores vs the OpenAI answer key
 
 Writes:
   manifest.json         - merged complete manifest (overwrites provenance snapshot)
@@ -63,6 +65,7 @@ def _build_summary(
     extraction: dict[str, Any],
     inference: dict[str, Any],
     reasoning: dict[str, Any] | None = None,
+    answers: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Headline metrics — the numbers that go on the cover page of a report."""
     agg  = retrieval.get("aggregate", {})
@@ -71,6 +74,7 @@ def _build_summary(
     ttft = inference.get("ttft_ms", {})
     tp   = inference.get("throughput_toks_per_sec", {})
     ragg = (reasoning or {}).get("aggregate", {})
+    aagg = {} if (answers or {}).get("skipped") else (answers or {}).get("aggregate", {})
 
     failure_rate: float | None = None
     if inference.get("total_calls", 0) > 0:
@@ -102,6 +106,11 @@ def _build_summary(
         "agent_latency_p50_ms": _val(ragg, "latency_ms", "p50"),
         "agent_latency_p95_ms": _val(ragg, "latency_ms", "p95"),
         "agent_mean_vector_hits": ragg.get("mean_vector_hits"),
+        # --- Answer quality (1–5 judge scores) ---
+        "answer_correctness":     _val(aagg, "correctness"),
+        "answer_factual_depth":   _val(aagg, "factual_depth"),
+        "answer_entity_coverage": _val(aagg, "entity_coverage"),
+        "answer_overall":         _val(aagg, "overall"),
     }
     # Drop None entries so missing stages don't pollute the summary block
     return {k: v for k, v in raw.items() if v is not None}
@@ -118,6 +127,7 @@ def finalize(run_dir: Path) -> dict[str, Any]:
     extraction = _safe_load(run_dir / "extraction.json")
     inference  = _safe_load(run_dir / "inference.json")
     reasoning  = _safe_load(run_dir / "reasoning.json")
+    answers    = _safe_load(run_dir / "answer_quality.json")
 
     # Collect all pipeline_*.json timing files in stage order
     pipeline: dict[str, Any] = {}
@@ -126,7 +136,7 @@ def finalize(run_dir: Path) -> dict[str, Any]:
         stage = data.get("stage", timing_file.stem.removeprefix("pipeline_"))
         pipeline[stage] = data
 
-    summary = _build_summary(retrieval, extraction, inference, reasoning)
+    summary = _build_summary(retrieval, extraction, inference, reasoning, answers)
 
     manifest.update({
         "run_type": "deterministic",
@@ -136,6 +146,7 @@ def finalize(run_dir: Path) -> dict[str, Any]:
             "extraction": extraction,
             "inference":  inference,
             "reasoning":  reasoning,
+            "answers":    answers,
         },
         "summary": summary,
     })

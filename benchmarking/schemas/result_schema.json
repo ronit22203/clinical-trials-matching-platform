@@ -171,5 +171,51 @@
       },
       "failure_count": {"type": "integer", "minimum": 0}
     }
+  },
+  "answer_quality_schema": {
+    "type": "object",
+    "required": ["run_id", "timestamp", "skipped"],
+    "properties": {
+      "run_id": {"type": "string"},
+      "timestamp": {"type": "string", "format": "date-time"},
+      "skipped": {"type": "boolean"},
+      "reason": {"type": "string"},
+      "config": {
+        "type": "object",
+        "properties": {
+          "model": {"type": "string"},
+          "golden_answers": {"type": "string"},
+          "generator_model": {"type": ["string", "null"]}
+        }
+      },
+      "aggregate": {
+        "type": "object",
+        "required": ["queries", "correctness", "factual_depth", "entity_coverage", "overall"],
+        "properties": {
+          "queries": {"type": "integer", "minimum": 0},
+          "correctness": {"type": "number", "minimum": 0, "maximum": 5},
+          "factual_depth": {"type": "number", "minimum": 0, "maximum": 5},
+          "entity_coverage": {"type": "number", "minimum": 0, "maximum": 5},
+          "overall": {"type": "number", "minimum": 0, "maximum": 5}
+        }
+      },
+      "per_query": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["query_id", "correctness", "factual_depth", "entity_coverage", "overall"],
+          "properties": {
+            "query_id": {"type": "string"},
+            "question": {"type": "string"},
+            "correctness": {"type": "integer", "minimum": 1, "maximum": 5},
+            "factual_depth": {"type": "integer", "minimum": 1, "maximum": 5},
+            "entity_coverage": {"type": "integer", "minimum": 1, "maximum": 5},
+            "overall": {"type": "number", "minimum": 1, "maximum": 5},
+            "missing_facts": {"type": "array", "items": {"type": "string"}},
+            "unsupported_claims": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      }
+    }
   }
 }
