@@ -1,0 +1,222 @@
+{
+  "document_doi": "10.64898/2026.03.17.26348414",
+  "document_title": "Falsification Testing of Sepsis Prediction Models: Evaluating Independent Biological Signal After Controlling for Care-Process Intensity",
+  "pdf_path": "/Users/ronitsaxena/Developer/healthcare-platform/data/pdfs/raw/medrxiv/2026/04/22/10.64898/2026.03.17.26348414/paper.pdf",
+  "pdf_sha256": "9247a99b8112f9de4abd187485c3b2bef46cb6679e64700fd5ad6b32b185303c",
+  "generator_model": "gpt-6.1-sol",
+  "generated_at": "2026-11-01T10:43:42.841315+00:00",
+  "answers": [
+    {
+      "id": "q01",
+      "query": "Do sepsis early-warning systems detect biological signal or care-process intensity?",
+      "answer": "In this study, models in the primary MIMIC-IV analysis predominantly detected biological signal rather than the measured care-process intensity. Removing four care-intensity proxies reduced AUROC only from 0.901 to 0.898, and none of the four primary falsification criteria were met. However, care-process intensity was not absent: care-only AUROC was 0.660 with logistic regression and 0.729 with XGBoost, suggesting nonlinear predictive information. Exploratory eICU results showed a larger AUROC reduction of 0.076 after removing care-intensity features, suggesting that their contribution may vary by setting. Thus, the paper supports biological signal dominating at the studied academic center, not a universal conclusion for all sepsis early-warning systems. It does not establish that these models warn before clinician suspicion or improve clinical outcomes.",
+      "entities_and_facts": [
+        "{'entity': 'Primary confirmatory cohort', 'fact': 'MIMIC-IV v3.1 included 65,241 adult ICU stays at Beth Israel Deaconess Medical Center; none of the four pre-registered falsification criteria were met.'}",
+        "{'entity': 'Biological versus full model performance', 'fact': 'The full XGBoost model achieved AUROC 0.901 (95% CI 0.899\u20130.904), versus 0.898 (95% CI 0.896\u20130.901) using biological features only; the reported unrounded drop was 0.0027.'}",
+        "{'entity': 'Care-intensity proxies', 'fact': 'The four measures were laboratory ordering frequency, vital measurement rate, nursing note frequency, and physician order rate, each expressed per ICU hour.'}",
+        "{'entity': 'Care-only prediction in MIMIC-IV', 'fact': 'Logistic regression achieved AUROC 0.660, below the 0.70 threshold; sensitivity-analysis XGBoost achieved 0.729, exceeding that threshold.'}",
+        "{'entity': 'Exploratory eICU replication', 'fact': 'Across 136,864 stays from 208 US hospitals, full-model AUROC was 0.812 and biological-only AUROC was 0.736, a drop of 0.076. This analysis was not pre-registered and requires prospective confirmation.'}",
+        "{'entity': 'Limits of inference', 'fact': 'The primary analysis was limited to one academic center, and only four care-intensity proxies were tested. The paper does not demonstrate warning ahead of clinician suspicion or improved clinical outcomes.'}"
+      ]
+    },
+    {
+      "id": "q02",
+      "query": "What is the primary conclusion about sepsis prediction at an elite academic medical center?",
+      "answer": "At the elite academic medical center studied, sepsis prediction models primarily detected genuine biological signal rather than care-process intensity. Removing care-intensity features had a negligible effect on predictive performance.",
+      "entities_and_facts": [
+        "The primary confirmatory analysis used MIMIC-IV v3.1, comprising 65,241 adult ICU stays at Beth Israel Deaconess Medical Center.",
+        "The full model achieved an AUROC of 0.901, compared with 0.898 for the biological-feature-only model.",
+        "Removing care-intensity features reduced AUROC by 0.0027.",
+        "The pre-registered hypothesis that models predominantly detect care-process intensity was not supported: 0 of 4 phases were confirmed."
+      ]
+    },
+    {
+      "id": "q03",
+      "query": "How does care-process leakage magnitude differ between academic medical centers and community hospitals?",
+      "answer": "Care-process leakage was much smaller at the academic center than in the community/regional hospital cohort. In MIMIC-IV at BIDMC, removing care-intensity features reduced AUROC by only 0.0027 (approximately 0.003), compared with 0.076 in eICU across 208 hospitals. The paper suggests that richer biological measurements at the academic center may make care-intensity proxies largely redundant. However, the eICU comparison was exploratory, and the institution-type explanation requires prospective confirmation; the study does not establish that all community hospitals have greater leakage than academic centers.",
+      "entities_and_facts": [
+        "{'entity': 'MIMIC-IV / Beth Israel Deaconess Medical Center', 'fact': 'Primary confirmatory academic-center cohort; removing care-intensity features reduced AUROC from 0.901 to 0.898, with a reported drop of 0.0027.'}",
+        "{'entity': 'eICU-CRD', 'fact': 'Exploratory cohort spanning 208 US hospitals; removing care-intensity features reduced AUROC from 0.812 to 0.736, a drop of 0.076.'}",
+        "{'entity': 'Institution-dependent leakage', 'fact': 'The paper proposes that rich biological measurements at the academic center make care-intensity proxies redundant, whereas these proxies may contribute more across community and regional hospitals.'}",
+        "{'entity': 'Evidence limitation', 'fact': 'The institutional comparison was not pre-specified and requires prospective confirmation.'}"
+      ]
+    },
+    {
+      "id": "q04",
+      "query": "What is the most clinically consequential finding regarding sepsis definition divergence?",
+      "answer": "The most clinically consequential finding was that clinical sepsis definitions and administrative sepsis coding identify substantially different patient populations. Sepsis-2 and Sepsis-3 agreed strongly (Jaccard similarity approximately 0.90), whereas their agreement with ICD-code-based CMS SEP-1 labels was only approximately 0.32 in MIMIC-IV and approximately 0.20 in eICU and MIMIC-III. This divergence raises concerns that hospital quality metrics, regulatory reporting, pay-for-performance measures, and AI benchmarks based on administrative labels may not reflect clinically defined sepsis. CMS comparisons could not be performed in the PhysioNet Challenge dataset because ICD codes were unavailable.",
+      "entities_and_facts": [
+        "Sepsis-2 and Sepsis-3: clinical sepsis definitions with Jaccard similarity approximately 0.90.",
+        "CMS SEP-1: operationalized in the study using administrative ICD codes.",
+        "MIMIC-IV: clinical-to-administrative Jaccard similarity 0.317 for both Sepsis-2 and Sepsis-3.",
+        "eICU: clinical-to-administrative Jaccard similarity approximately 0.197.",
+        "MIMIC-III: clinical-to-administrative Jaccard similarity approximately 0.199.",
+        "PhysioNet/CinC 2019 Challenge: ICD codes were unavailable, preventing CMS SEP-1 comparisons.",
+        "The paper identifies implications for hospital quality metrics, regulatory reporting, pay-for-performance measures, and AI benchmarks constructed from administrative labels."
+      ]
+    },
+    {
+      "id": "q05",
+      "query": "What AUROC did biological features achieve predicting Sepsis-3 labels in MIMIC-IV?",
+      "answer": "The abstract reports an AUROC of 0.901 (95% CI 0.899\u20130.904). However, the detailed Results distinguish the biological-feature-only model, which achieved 0.898 (95% CI 0.896\u20130.901), from the full model, which achieved 0.901.",
+      "entities_and_facts": [
+        "Dataset: MIMIC-IV v3.1.",
+        "Prediction target: Sepsis-3 labels.",
+        "Abstract: biological-feature AUROC 0.901 (95% CI 0.899\u20130.904).",
+        "Detailed Results: biological-feature-only AUROC 0.898 (95% CI 0.896\u20130.901); full-model AUROC 0.901."
+      ]
+    },
+    {
+      "id": "q06",
+      "query": "What was the AUC drop when care-intensity features were removed from the full prediction model?",
+      "answer": "In the primary MIMIC-IV analysis, removing care-intensity features produced an AUC drop of 0.0027 (approximately 0.003), from 0.901 for the full model to 0.898 for the biological-feature-only model.",
+      "entities_and_facts": [
+        "{'dataset': 'MIMIC-IV v3.1', 'analysis': 'Primary confirmatory Phase 2 feature dependence test', 'full_model_AUROC': 0.901, 'biological_feature_only_AUROC': 0.898, 'AUC_drop': 0.0027}"
+      ]
+    },
+    {
+      "id": "q07",
+      "query": "What Jaccard similarity was found between CMS SEP-1 administrative coding and clinical sepsis definitions?",
+      "answer": "The Jaccard similarity between CMS SEP-1 administrative coding and the clinical sepsis definitions was 0.317 (approximately 0.32) for both Sepsis-2 and Sepsis-3 in MIMIC-IV. Exploratory analyses found similarities of approximately 0.20 in eICU (0.197) and MIMIC-III (0.199).",
+      "entities_and_facts": [
+        "{'entity': 'MIMIC-IV', 'fact': 'CMS SEP-1 versus Sepsis-2 and versus Sepsis-3 each had Jaccard similarity 0.317.'}",
+        "{'entity': 'eICU', 'fact': 'Clinical definitions versus CMS SEP-1 had reported Jaccard similarity 0.197.'}",
+        "{'entity': 'MIMIC-III', 'fact': 'Clinical definitions versus CMS SEP-1 had reported Jaccard similarity 0.199.'}"
+      ]
+    },
+    {
+      "id": "q08",
+      "query": "What was the XGBoost sensitivity analysis AUROC for care-intensity features alone in Phase 3?",
+      "answer": "The Phase 3 XGBoost sensitivity analysis using care-intensity features alone achieved an AUROC of 0.729 (95% CI 0.726\u20130.733).",
+      "entities_and_facts": [
+        "{'phase': 'Phase 3 \u2014 Care-Intensity Universality', 'dataset': 'MIMIC-IV v3.1', 'model': 'XGBoost sensitivity analysis', 'features': 'Care-intensity features alone', 'AUROC': 0.729, '95% CI': [0.726, 0.733]}"
+      ]
+    },
+    {
+      "id": "q09",
+      "query": "How many adult ICU stays were included in the primary MIMIC-IV analytic cohort after exclusions?",
+      "answer": "The primary MIMIC-IV analytic cohort included 65,241 adult ICU stays after exclusions.",
+      "entities_and_facts": [
+        "{'entity': 'Primary MIMIC-IV v3.1 analytic cohort', 'fact': 'Included 65,241 adult ICU stays after exclusions.'}"
+      ]
+    },
+    {
+      "id": "q10",
+      "query": "How does the Sepsis-3 definition differ from CMS SEP-1 in this study?",
+      "answer": "In this study, Sepsis-3 was a clinical definition requiring a SOFA score \u22652 plus an infection proxy based on antibiotic prescription and/or a blood-culture order within specified timing windows. The study used maximum total SOFA during the ICU stay, not an acute increase of \u22652 points from baseline, which it acknowledged as a limitation. CMS SEP-1 was operationalized as an administrative definition based on ICD-9 codes 995.91, 995.92, or 785.52, or ICD-10 codes beginning A40, A41, R65.2, or R57.2. These definitions identified substantially different populations: in MIMIC-IV, Sepsis-3 labeled 31.8% of stays versus 14.6% for CMS SEP-1, with a Jaccard similarity of 0.317. CMS SEP-1 could not be computed in the PhysioNet/CinC 2019 dataset because ICD codes were unavailable.",
+      "entities_and_facts": [
+        "{'entity': 'Sepsis-3', 'fact': 'Required SOFA \u22652 plus an infection proxy; maximum total SOFA per stay was used without baseline comparison.'}",
+        "{'entity': 'Infection proxy', 'fact': 'Antibiotic prescription AND/OR blood-culture order, with timing windows of antibiotics \u226472 hours after culture initiation or culture \u226424 hours after antibiotic start.'}",
+        "{'entity': 'CMS SEP-1', 'fact': 'Operationalized using ICD-9 codes 995.91, 995.92, and 785.52 and ICD-10 codes beginning A40, A41, R65.2, or R57.2.'}",
+        "{'entity': 'MIMIC-IV comparison', 'fact': 'Sepsis-3 identified 20,764 stays (31.8%); CMS SEP-1 identified 9,535 (14.6%); their Jaccard similarity was 0.317.'}",
+        "{'entity': 'PhysioNet/CinC 2019', 'fact': 'CMS SEP-1 was not computable because the dataset lacked ICD codes.'}"
+      ]
+    },
+    {
+      "id": "q11",
+      "query": "How was the infection proxy defined, and what criteria were used to identify antibiotics and blood cultures?",
+      "answer": "The infection proxy was defined permissively as an antibiotic prescription AND/OR a blood culture order within a timing window: antibiotics within 72 hours after culture initiation, OR a culture within 24 hours after antibiotic start. Antibiotics were identified by keyword matching against 43 drug names in prescription records. Blood cultures were identified from microbiology events whose specimen type contained 'BLOOD'.",
+      "entities_and_facts": [
+        "{'entity': 'Infection proxy', 'fact': 'Antibiotic prescription AND/OR blood culture order, with antibiotics \u226472 hours after culture initiation OR culture \u226424 hours after antibiotic start.'}",
+        "{'entity': 'Antibiotics', 'fact': 'Identified by keyword matching across 43 drug names in prescription records.'}",
+        "{'entity': 'Blood cultures', 'fact': \"Identified from microbiology events where specimen type contained 'BLOOD'.\"}"
+      ]
+    },
+    {
+      "id": "q12",
+      "query": "What are care-intensity proxy features and how were they operationalized per ICU hour?",
+      "answer": "Care-intensity proxy features are measures of care-process activity intended to capture clinician ordering and monitoring intensity rather than biological measurements. The study operationalized them as four composite rates per ICU hour: laboratory ordering frequency = number of lab orders / ICU length of stay in hours; vital measurement rate = number of vital-sign measurements / ICU length of stay in hours; nursing note frequency = datetimeevents count / ICU length of stay in hours; and physician order rate = the sum of inputevents, procedureevents, and prescriptions counts / ICU length of stay in hours.",
+      "entities_and_facts": [
+        "{'entity': 'Laboratory ordering frequency', 'fact': 'Lab orders divided by ICU length of stay in hours.'}",
+        "{'entity': 'Vital measurement rate', 'fact': 'Vital-sign measurements divided by ICU length of stay in hours.'}",
+        "{'entity': 'Nursing note frequency', 'fact': 'datetimeevents count divided by ICU length of stay in hours.'}",
+        "{'entity': 'Physician order rate', 'fact': 'Sum of inputevents, procedureevents, and prescriptions counts divided by ICU length of stay in hours.'}"
+      ]
+    },
+    {
+      "id": "q13",
+      "query": "What pre-registration requirements were applied and when was this study registered on OSF?",
+      "answer": "The study was registered on OSF on March 11, 2026, before any patient-data access or analysis. The pre-registration specified the hypothesis, primary dataset, inclusion criteria, analysis plan, and thresholds for all four falsification phases: mean pairwise Jaccard similarity <0.50; AUROC drop >0.15 after removing care-intensity features; care-only AUROC >0.70; and synthetic-versus-real discriminator AUROC <0.60. The registration was timestamped and embargoed to prevent post-hoc modification. Deviations were to be reported transparently, and results reported regardless of direction. MIMIC-IV was the primary confirmatory dataset; the subsequent replication analyses were exploratory and not pre-registered.",
+      "entities_and_facts": [
+        "{'entity': 'OSF registration', 'facts': ['Registered March 11, 2026, before patient-data access and analysis.', 'Project URL: https://osf.io/9tbjm.', 'Registration was timestamped and embargoed to prevent post-hoc modification.']}",
+        "{'entity': 'Pre-specified study elements', 'facts': ['Hypothesis, statistical thresholds, primary dataset, inclusion criteria, and analysis plan.', 'MIMIC-IV v3.1 was the primary confirmatory dataset.', 'Deviations were to be reported transparently, and results reported regardless of direction.']}",
+        "{'entity': 'Four-phase thresholds', 'facts': ['Phase 1: mean pairwise Jaccard similarity <0.50.', 'Phase 2: AUROC drop >0.15 after removing care-intensity features.', 'Phase 3: care-intensity-only AUROC >0.70.', 'Phase 4: real-versus-synthetic discriminator AUROC <0.60.']}",
+        "{'entity': 'Replication analyses', 'facts': ['eICU, MIMIC-III, and PhysioNet/CinC 2019 analyses were exploratory, not pre-registered, and conducted after the primary results were known.']}"
+      ]
+    },
+    {
+      "id": "q14",
+      "query": "How did eICU multi-center results differ from MIMIC-IV in Phase 2 AUC drop and care-intensity signal?",
+      "answer": "In Phase 2, removing care-intensity features reduced AUROC by 0.0760 in the eICU multi-center cohort, compared with only 0.0027 (approximately 0.003) in MIMIC-IV. Full-model versus biological-only AUROC was 0.812 versus 0.736 in eICU and 0.901 versus 0.898 in MIMIC-IV. Thus, care-intensity features contributed more predictive information across eICU\u2019s diverse hospitals than at the single academic center represented by MIMIC-IV. This institution-dependent difference was exploratory and requires prospective confirmation; neither drop exceeded the pre-specified 0.15 threshold.",
+      "entities_and_facts": [
+        "{'entity': 'eICU-CRD v2.0', 'facts': ['Exploratory multi-center cohort covering 208 US hospitals.', 'Phase 2 AUC drop: 0.0760.', 'Full-model AUROC: 0.812; biological-only AUROC: 0.736.']}",
+        "{'entity': 'MIMIC-IV v3.1', 'facts': ['Primary confirmatory cohort from Beth Israel Deaconess Medical Center.', 'Phase 2 AUC drop: 0.0027.', 'Full-model AUROC: 0.901; biological-only AUROC: 0.898.']}",
+        "{'entity': 'Phase 2 interpretation', 'facts': ['Care-intensity signal was larger in eICU than in MIMIC-IV.', 'The pre-specified AUC-drop threshold was greater than 0.15; neither cohort exceeded it.', 'The institution-dependent difference was not pre-specified and requires prospective confirmation.']}"
+      ]
+    },
+    {
+      "id": "q15",
+      "query": "How did the Jaccard similarity between clinical and administrative sepsis definitions compare across MIMIC-IV, eICU, and MIMIC-III?",
+      "answer": "Clinical\u2013administrative sepsis agreement was low across all three datasets, but higher in MIMIC-IV (Jaccard 0.317) than in eICU (0.197) or MIMIC-III (0.199). Thus, overlap was approximately 0.32 in MIMIC-IV versus 0.20 in the other two datasets. By comparison, agreement between the clinical definitions Sepsis-2 and Sepsis-3 was much higher: 0.903, 0.951, and 0.887, respectively.",
+      "entities_and_facts": [
+        "{'dataset': 'MIMIC-IV', 'clinical_vs_administrative_jaccard': 0.317, 'sepsis_2_vs_sepsis_3_jaccard': 0.903}",
+        "{'dataset': 'eICU', 'clinical_vs_administrative_jaccard': 0.197, 'sepsis_2_vs_sepsis_3_jaccard': 0.951}",
+        "{'dataset': 'MIMIC-III', 'clinical_vs_administrative_jaccard': 0.199, 'sepsis_2_vs_sepsis_3_jaccard': 0.887}",
+        "{'clinical_definitions': ['Sepsis-2', 'Sepsis-3'], 'administrative_definition': 'CMS SEP-1, operationalized using ICD codes'}"
+      ]
+    },
+    {
+      "id": "q16",
+      "query": "Which datasets met the pre-specified Phase 3 threshold of care-only AUROC greater than 0.70?",
+      "answer": "None of the four datasets met the Phase 3 threshold of care-only AUROC >0.70 using the primary logistic regression model. MIMIC-IV did exceed the threshold in the XGBoost sensitivity analysis (AUROC 0.729), but not in the primary analysis.",
+      "entities_and_facts": [
+        "{'dataset': 'MIMIC-IV', 'care_only_AUROC_logistic_regression': 0.66, 'met_threshold': False}",
+        "{'dataset': 'eICU', 'care_only_AUROC_logistic_regression': 0.659, 'met_threshold': False}",
+        "{'dataset': 'MIMIC-III', 'care_only_AUROC_logistic_regression': 0.609, 'met_threshold': False}",
+        "{'dataset': 'PhysioNet/CinC 2019 Sepsis Challenge', 'care_only_AUROC_logistic_regression': 0.694, 'met_threshold': False}",
+        "{'dataset': 'MIMIC-IV', 'analysis': 'XGBoost sensitivity analysis', 'care_only_AUROC': 0.729, 'met_threshold': True}"
+      ]
+    },
+    {
+      "id": "q17",
+      "query": "How did Phase 4 synthetic validation discriminator AUROC compare between MIMIC-IV and the PhysioNet 2019 Challenge dataset?",
+      "answer": "Phase 4 discriminator AUROC was 0.633 in MIMIC-IV versus 0.460 in the PhysioNet 2019 Challenge dataset. Thus, synthetic records remained distinguishable from real records in MIMIC-IV, whereas discrimination was near chance in the Challenge dataset. Only the Challenge result met the pre-specified AUROC <0.60 threshold, although that analysis was exploratory.",
+      "entities_and_facts": [
+        "{'dataset': 'MIMIC-IV', 'phase_4_discriminator_AUROC': 0.633, 'analysis_type': 'Primary confirmatory', 'met_threshold_below_0.60': False}",
+        "{'dataset': 'PhysioNet/CinC 2019 Sepsis Challenge', 'phase_4_discriminator_AUROC': 0.46, 'analysis_type': 'Exploratory', 'met_threshold_below_0.60': True}"
+      ]
+    },
+    {
+      "id": "q18",
+      "query": "What four phases comprised the pre-registered falsification framework?",
+      "answer": "The framework comprised four phases: (1) Ground Truth Stability\u2014measure pairwise Jaccard concordance among Sepsis-2, Sepsis-3, and CMS SEP-1 definitions, with mean Jaccard <0.50 as the falsification threshold; (2) Feature Dependence Test\u2014compare full-model AUROC with biological-feature-only AUROC after removing care-intensity proxies, with an AUROC drop >0.15 as the threshold; (3) Care-Intensity Universality\u2014predict Sepsis-3 using only care-intensity features, with AUROC >0.70 as the threshold; and (4) Synthetic Validation\u2014test whether a discriminator can distinguish real sepsis records from synthetic records generated to match care-intensity distributions, with discriminator AUROC <0.60 as the threshold.",
+      "entities_and_facts": [
+        "{'phase': 1, 'name': 'Ground Truth Stability', 'definitions': ['Sepsis-2', 'Sepsis-3', 'CMS SEP-1'], 'metric': 'Mean pairwise Jaccard similarity', 'pre_specified_threshold': '<0.50'}",
+        "{'phase': 2, 'name': 'Feature Dependence Test', 'comparison': 'Full-feature versus biological-feature-only XGBoost models predicting Sepsis-3', 'pre_specified_threshold': 'AUROC drop >0.15 after removing care-intensity features'}",
+        "{'phase': 3, 'name': 'Care-Intensity Universality', 'predictors': ['Lab ordering frequency', 'Vital measurement rate', 'Nursing note frequency', 'Physician order rate'], 'outcome': 'Sepsis-3', 'pre_specified_threshold': 'Care-only AUROC >0.70'}",
+        "{'phase': 4, 'name': 'Synthetic Validation', 'method': 'Generate synthetic records using a Gaussian copula fitted to care-intensity distributions of Sepsis-3 cases, then discriminate real from synthetic records', 'pre_specified_threshold': 'Discriminator AUROC <0.60'}"
+      ]
+    },
+    {
+      "id": "q19",
+      "query": "What statistical methods were used for bootstrap confidence intervals and cross-validation in this study?",
+      "answer": "The study calculated 95% bootstrap confidence intervals using 1,000 iterations with replacement. For the Phase 2 XGBoost models comparing full versus biological-only features, it used 5-fold stratified cross-validation. The Phase 4 XGBoost discriminator distinguishing real from synthetic records used 5-fold cross-validation; stratification was not explicitly specified for that phase.",
+      "entities_and_facts": [
+        "{'method': 'Bootstrap confidence intervals', 'facts': '95% confidence intervals based on 1,000 iterations with replacement.'}",
+        "{'method': 'Phase 2 cross-validation', 'facts': '5-fold stratified cross-validation for XGBoost classifiers trained on Sepsis-3 labels using full and biological-only feature sets.'}",
+        "{'method': 'Phase 4 cross-validation', 'facts': '5-fold cross-validation for the XGBoost real-versus-synthetic discriminator; the paper does not explicitly state that these folds were stratified.'}"
+      ]
+    },
+    {
+      "id": "q20",
+      "query": "How was the Gaussian copula used to generate synthetic records in Phase 4 and how was distributional equivalence confirmed?",
+      "answer": "In Phase 4, a Gaussian copula was fitted to the care-intensity feature distributions of confirmed Sepsis-3 cases. The features were rank-transformed to pseudo-uniform values and then probit-transformed into Gaussian space. A sample covariance matrix was calculated, with eigenvalue clipping to ensure positive definiteness. Multivariate normal samples were then drawn and inverse-transformed using empirical quantile mapping to generate 50,000 synthetic records. Distributional equivalence was assessed using Kolmogorov\u2013Smirnov statistics, reported as 0.007 for laboratory ordering frequency, 0.003 for vital measurement rate, 0.004 for nursing note frequency, and 0.004 for physician order rate. Despite these close distributional matches, a separate XGBoost discriminator using five-fold cross-validation distinguished real from synthetic records with AUROC 0.633 (95% CI 0.628\u20130.637), so the pre-specified Phase 4 threshold of AUROC <0.60 was not met.",
+      "entities_and_facts": [
+        "{'entity': 'Gaussian copula', 'fact': 'Fitted to care-intensity feature distributions of confirmed Sepsis-3 cases.'}",
+        "{'entity': 'Synthetic-record generation', 'fact': 'Used rank transformation to pseudo-uniform values, probit transformation to Gaussian space, sample covariance estimation with eigenvalue clipping, multivariate normal sampling, and inverse transformation through empirical quantile mapping; generated 50,000 records.'}",
+        "{'entity': 'Kolmogorov\u2013Smirnov statistics', 'fact': 'Reported values were lab ordering frequency 0.007, vital measurement rate 0.003, nursing note frequency 0.004, and physician order rate 0.004.'}",
+        "{'entity': 'XGBoost discriminator', 'fact': 'Five-fold cross-validation yielded AUROC 0.633 (95% CI 0.628\u20130.637) in MIMIC-IV, failing the pre-specified indistinguishability threshold of AUROC <0.60.'}"
+      ]
+    }
+  ]
+}
