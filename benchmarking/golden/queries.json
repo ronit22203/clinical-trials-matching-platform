@@ -3,7 +3,7 @@
   "document_title": "Falsification Testing of Sepsis Prediction Models: Evaluating Independent Biological Signal After Controlling for Care-Process Intensity",
   "chunks_file": "2026.03.17.26348414_chunks.json",
   "total_chunks": 24,
-  "chunk_index_note": "chunk_XX refers to chunk_index field in Qdrant payload (0-based). Substantive chunks: 01,04,06,07,09,11,13,15,17,19,21,23. Chunks 00,03,05,08,10,12,14,16,18,20,22 are header/footer boilerplate.",
+  "chunk_index_note": "Frozen chunk ids below were labeled on a 24-chunk segmentation. The retrieval evaluator ignores them when golden_answers.json and the current chunks file are both present, and grades each live chunk by overlap with the golden answer.",
   "queries": [
     {
       "id": "q01",

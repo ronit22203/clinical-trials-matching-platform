@@ -52,6 +52,39 @@ def _relevance_grade(chunk_index: int, relevance_grades: dict[str, int]) -> int:
     return relevance_grades.get(key, 0)
 
 
+def _content_tokens(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]{4,}", (text or "").lower()))
+
+
+def _derive_relevance_grades(
+    chunks: list[dict[str, Any]],
+    answer_text: str,
+) -> dict[str, int]:
+    """Grade the current chunk file by how much of the golden answer it contains.
+
+    Frozen chunk ids from an older segmentation are not comparable once the
+    pipeline emits a different number of chunks.
+    """
+    answer_tokens = _content_tokens(answer_text)
+    if not answer_tokens or not chunks:
+        return {}
+    overlaps: list[float] = []
+    for chunk in chunks:
+        chunk_tokens = _content_tokens(chunk.get("content") or "")
+        overlaps.append(len(answer_tokens & chunk_tokens) / len(answer_tokens))
+    best = max(overlaps)
+    if best < 0.25:
+        return {}
+    cutoff = max(0.30, 0.75 * best)
+    strong = max(0.45, 0.90 * best)
+    grades: dict[str, int] = {}
+    for index, overlap in enumerate(overlaps):
+        if overlap < cutoff:
+            continue
+        grades[f"chunk_{index:02d}"] = 2 if overlap >= strong else 1
+    return grades
+
+
 def _recall_at_k(ranked_grades: list[int], k: int, total_relevant: int) -> float:
     if total_relevant == 0:
         return 0.0
@@ -231,6 +264,52 @@ class RetrievalEvaluator:
             for i, c in enumerate(candidates[: self.top_k])
         ]
 
+    def _align_queries_to_current_chunks(
+        self,
+        golden_path: Path,
+        golden: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Replace frozen chunk ids with grades from the chunks on disk."""
+        queries = [dict(q) for q in golden["queries"]]
+        chunks_name = golden.get("chunks_file", "")
+        chunks_path = _REPO_ROOT / "data" / "artifacts" / "chunk" / chunks_name
+        answers_path = golden_path.parent / "golden_answers.json"
+
+        if not chunks_path.is_file() or not answers_path.is_file():
+            log.warning(
+                "Retrieval grades stay on frozen chunk ids (chunks=%s, answers=%s)",
+                chunks_path.is_file(),
+                answers_path.is_file(),
+            )
+            return queries
+
+        with open(chunks_path) as handle:
+            chunk_data = json.load(handle)
+        with open(answers_path) as handle:
+            answer_data = json.load(handle)
+        chunks = chunk_data.get("chunks", [])
+        answers = {
+            item["id"]: item.get("answer", "")
+            for item in answer_data.get("answers", [])
+            if item.get("id")
+        }
+        aligned = 0
+        for query in queries:
+            derived = _derive_relevance_grades(chunks, answers.get(query.get("id", ""), ""))
+            if derived:
+                query["relevance_grades"] = derived
+                aligned += 1
+        self._relevance_source = (
+            f"answer overlap against {chunks_name} ({len(chunks)} chunks)"
+        )
+        log.info(
+            "Relevance aligned to %d current chunks for %d/%d queries",
+            len(chunks),
+            aligned,
+            len(queries),
+        )
+        return queries
+
     def evaluate_query(self, query: dict[str, Any]) -> dict[str, Any]:
         qid = query["id"]
         qtext = query["text"]
@@ -278,7 +357,7 @@ class RetrievalEvaluator:
         with open(golden_path) as f:
             golden = json.load(f)
 
-        queries = golden["queries"]
+        queries = self._align_queries_to_current_chunks(golden_path, golden)
         log.info("Evaluating %d queries against collection '%s'", len(queries), self.collection)
 
         per_query: list[dict[str, Any]] = []
@@ -311,6 +390,7 @@ class RetrievalEvaluator:
             "embedding_model": self.embedding_model_name,
             "top_k": self.top_k,
             "bootstrap_resamples": self.bootstrap_resamples,
+            "relevance_source": getattr(self, "_relevance_source", "frozen chunk ids"),
         }
         if self.reranker_model_name:
             cfg_block["reranker_model"] = self.reranker_model_name
