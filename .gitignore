@@ -49,6 +49,10 @@ data/temporal/**
 !data/models/.gitkeep
 !data/neo4j/.gitkeep
 !data/pdfs/.gitkeep
+# The deterministic-run paper. Parent directories must be un-ignored or git
+# will not descend into data/pdfs to see this one file.
+!data/pdfs/**/
+!data/pdfs/raw/medrxiv/2026/04/22/10.64898/2026.03.17.26348414/paper.pdf
 !data/qdrant/.gitkeep
 !data/temporal/.gitkeep
 
