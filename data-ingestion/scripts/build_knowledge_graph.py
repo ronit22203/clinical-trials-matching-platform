@@ -23,13 +23,16 @@ REPO_ROOT = PROJECT_ROOT.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config_loader import load_ingestion_config
+from src.log_format import RelativePathFormatter
 from src.processors.graph_creator import GraphCreator
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
+_handler = logging.StreamHandler()
+_handler.setFormatter(RelativePathFormatter(
+    "%(asctime)s | %(levelname)s | %(message)s",
     datefmt="%H:%M:%S",
-)
+    root=REPO_ROOT,
+))
+logging.basicConfig(level=logging.INFO, handlers=[_handler])
 logger = logging.getLogger(__name__)
 
 

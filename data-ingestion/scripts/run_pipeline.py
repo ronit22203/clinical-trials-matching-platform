@@ -18,6 +18,7 @@ REPO_ROOT = PROJECT_ROOT.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.determinism import DeterminismTracker
+from src.log_format import RelativePathFormatter
 from src.config_loader import load_ingestion_config
 from src.extractors.pdf_marker_v2 import (
     initialize_models,
@@ -65,16 +66,19 @@ class PipelineLogger:
         )
         file_handler.setLevel(getattr(logging, file_level_name.upper(), logging.DEBUG))
         
-        # Rich formatter with timestamps and colors for console
-        console_formatter = logging.Formatter(
+        # Rich formatter with timestamps and colors for console.
+        # Absolute paths under the repo are rendered relative to the repo root.
+        console_formatter = RelativePathFormatter(
             '%(asctime)s | %(levelname)-8s | %(message)s',
-            datefmt='%H:%M:%S'
+            datefmt='%H:%M:%S',
+            root=REPO_ROOT,
         )
         
         # Detailed formatter for file (includes function info)
-        file_formatter = logging.Formatter(
+        file_formatter = RelativePathFormatter(
             '%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            datefmt='%Y-%m-%d %H:%M:%S',
+            root=REPO_ROOT,
         )
         
         console_handler.setFormatter(console_formatter)
