@@ -8,12 +8,14 @@ Captures everything needed to reproduce a benchmark run:
   - chunk count from the canonical chunks file
   - Qdrant collection point count
   - model names from app.yaml
+  - hardware: MacBook when the run is local, NVIDIA when a GPU host is production
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import platform
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -90,6 +92,83 @@ def _qdrant_point_count(qdrant_url: str, collection: str) -> int | None:
         return data["result"]["points_count"]
     except Exception:
         return None
+
+
+def _nvidia_gpu_name() -> str | None:
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    name = next((line.strip() for line in result.stdout.splitlines() if line.strip()), "")
+    return name or None
+
+
+def _mac_hardware() -> tuple[str | None, str | None]:
+    model: str | None = None
+    chip: str | None = None
+    try:
+        result = subprocess.run(
+            ["system_profiler", "SPHardwareDataType"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None, None
+    if result.returncode != 0:
+        return None, None
+    for line in result.stdout.splitlines():
+        key, separator, value = line.strip().partition(":")
+        if not separator:
+            continue
+        if key == "Model Name":
+            model = value.strip() or None
+        elif key == "Chip":
+            chip = value.strip() or None
+    return model, chip
+
+
+def classify_hardware(
+    *,
+    system: str,
+    nvidia_name: str | None,
+    mac_model: str | None,
+    mac_chip: str | None,
+) -> dict[str, str]:
+    """Label a local Mac as a MacBook and a GPU server as NVIDIA."""
+    if system == "Darwin":
+        model = mac_model or "MacBook"
+        if mac_chip and mac_chip not in model:
+            device = f"{model} ({mac_chip})"
+        else:
+            device = model
+        return {"environment": "local", "device": device}
+
+    if nvidia_name:
+        name = nvidia_name.strip()
+        if not name.upper().startswith("NVIDIA"):
+            name = f"NVIDIA {name}"
+        return {"environment": "production", "device": name}
+
+    return {"environment": "local", "device": system or "unknown"}
+
+
+def detect_hardware() -> dict[str, str]:
+    system = platform.system()
+    mac_model, mac_chip = _mac_hardware() if system == "Darwin" else (None, None)
+    return classify_hardware(
+        system=system,
+        nvidia_name=None if system == "Darwin" else _nvidia_gpu_name(),
+        mac_model=mac_model,
+        mac_chip=mac_chip,
+    )
 
 
 def _benchmark_pdf() -> Path | None:
@@ -169,6 +248,7 @@ def capture(run_id: str, config_path: Path | None = None) -> dict[str, Any]:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "git_commit": _git_commit(),
         "git_dirty": _git_dirty(),
+        "hardware": detect_hardware(),
         "config_files": config_hashes,
         "models": {
             "embedding": embedding_model,

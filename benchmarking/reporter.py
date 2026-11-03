@@ -78,8 +78,12 @@ def generate_report(run_dir: Path) -> str:
         lines.append("## Provenance")
         lines.append("")
         models = manifest.get("models", {})
-        lines.append(f"| Component | Value |")
-        lines.append(f"|-----------|-------|")
+        hardware = manifest.get("hardware") or {}
+        lines.append("| Component | Value |")
+        lines.append("|-----------|-------|")
+        if hardware:
+            lines.append(f"| Environment | `{hardware.get('environment', 'N/A')}` |")
+            lines.append(f"| Hardware | `{hardware.get('device', 'N/A')}` |")
         lines.append(f"| Embedding model | `{models.get('embedding', 'N/A')}` |")
         lines.append(f"| KG extraction model | `{models.get('kg_extraction', 'N/A')}` |")
         lines.append(f"| Agent reasoning model | `{models.get('agent_reasoning', 'N/A')}` |")
