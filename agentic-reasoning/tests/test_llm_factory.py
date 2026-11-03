@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from src.llm_factory import LLMHealth, check_llm_health
+from src.llm_factory import LLMHealth, build_llm, check_llm_health
 
 
 def _check_with_payload(model: str, payload: object) -> tuple[LLMHealth, MagicMock]:
@@ -182,3 +182,42 @@ def test_health_preserves_transport_error_detail() -> None:
     assert health.available is False
     assert health.detail is not None
     assert health.detail.startswith("ConnectError: connection refused")
+
+
+def test_ollama_build_maps_max_tokens_to_num_predict() -> None:
+    with patch("langchain_ollama.ChatOllama") as chat:
+        build_llm(
+            "ollama/medgemma:4b",
+            temperature=0.1,
+            max_tokens=1024,
+            top_p=0.9,
+            frequency_penalty=0.0,
+            presence_penalty=0.0,
+        )
+
+    kwargs = chat.call_args.kwargs
+    assert kwargs["model"] == "medgemma:4b"
+    assert kwargs["num_predict"] == 1024
+    assert kwargs["temperature"] == 0.1
+    assert kwargs["top_p"] == 0.9
+    assert "max_tokens" not in kwargs
+    assert "frequency_penalty" not in kwargs
+    assert "presence_penalty" not in kwargs
+
+
+def test_ollama_build_keeps_explicit_num_predict() -> None:
+    with patch("langchain_ollama.ChatOllama") as chat:
+        build_llm("ollama/medgemma:4b", max_tokens=1024, num_predict=256)
+
+    assert chat.call_args.kwargs["num_predict"] == 256
+    assert "max_tokens" not in chat.call_args.kwargs
+
+
+def test_openai_compatible_build_keeps_max_tokens() -> None:
+    with patch("langchain_openai.ChatOpenAI") as chat:
+        build_llm("lmstudio/qwen3-8b", max_tokens=1024, temperature=0.1)
+
+    kwargs = chat.call_args.kwargs
+    assert kwargs["max_tokens"] == 1024
+    assert kwargs["temperature"] == 0.1
+    assert "num_predict" not in kwargs

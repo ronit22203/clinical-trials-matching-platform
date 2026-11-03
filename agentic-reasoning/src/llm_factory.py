@@ -265,6 +265,22 @@ def check_llm_health(model: str, timeout_seconds: float = 2.0) -> LLMHealth:
     return LLMHealth(endpoint=endpoint, available=True)
 
 
+def _ollama_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Map the shared model params onto fields ChatOllama actually applies.
+
+    ChatOllama caps generation with ``num_predict``. The shared config name is
+    ``max_tokens``, and Pydantic drops that unknown field, which leaves Ollama
+    generating until the context window fills.
+    """
+    translated = dict(params)
+    max_tokens = translated.pop("max_tokens", None)
+    translated.pop("frequency_penalty", None)
+    translated.pop("presence_penalty", None)
+    if translated.get("num_predict") is None and max_tokens is not None:
+        translated["num_predict"] = max_tokens
+    return {k: v for k, v in translated.items() if v is not None}
+
+
 def build_llm(model: str, **kwargs: Any) -> BaseChatModel:
     """Return a LangChain chat model for the given ``provider/model-name`` string.
 
@@ -292,7 +308,7 @@ def build_llm(model: str, **kwargs: Any) -> BaseChatModel:
         return ChatOllama(
             model=endpoint.model_name,
             base_url=endpoint.base_url,
-            **params,
+            **_ollama_params(params),
         )
 
     if endpoint.provider == "sglang":
