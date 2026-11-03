@@ -1,5 +1,5 @@
 """
-inference_evaluator.py — TTFT, TPOT, throughput via LM Studio streaming API.
+inference_evaluator.py — TTFT, TPOT, throughput via the configured local model.
 
 Makes 3 independent runs of the 20 golden queries through the chat completions
 endpoint with streaming enabled, capturing:
@@ -13,8 +13,8 @@ Usage:
         --queries golden/queries.json \\
         --output results/<RUN_DIR>/inference.json \\
         --runs 3 \\
-        [--model qwen3-8b] \\
-        [--base-url http://localhost:1234/v1] \\
+        [--model medgemma:4b] \\
+        [--base-url http://127.0.0.1:11434/v1] \\
         [--max-tokens 256] \\
         [--timeout 120]
 """
@@ -70,6 +70,56 @@ def _load_env() -> dict[str, str]:
 
 def _resolve_env_str(val: str, env: dict[str, str]) -> str:
     return re.sub(r"\$\{([^}]+)\}", lambda m: env.get(m.group(1), ""), val)
+
+
+def _ipv4_loopback(url: str) -> str:
+    """Use 127.0.0.1 so a localhost lookup that prefers ::1 still hits the server."""
+    return re.sub(r"://(\[::1\]|localhost)(?=[:/]|$)", "://127.0.0.1", url)
+
+
+def resolve_inference_endpoint(
+    app_cfg: dict[str, Any],
+    env: dict[str, str],
+    *,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> tuple[str, str]:
+    """Return ``(openai_base_url, model_name)`` for the configured agent.
+
+    ``agentic_reasoning.agent.model`` is ``provider/model``. Chat completions
+    want the bare model name and that provider's ``/v1`` base. An unset
+    LM Studio URL must not override an Ollama model.
+    """
+    agent_cfg = (app_cfg.get("agentic_reasoning") or {}).get("agent") or {}
+    if not agent_cfg:
+        legacy = (app_cfg.get("agentic_reasoning") or {}).get("agents") or {}
+        if legacy:
+            agent_cfg = next(iter(legacy.values()))
+
+    raw_model = (model or agent_cfg.get("model") or "unknown").strip()
+    provider, separator, model_name = raw_model.partition("/")
+    if not separator or provider not in {"ollama", "lmstudio", "sglang"}:
+        provider = ""
+        model_name = raw_model
+
+    if base_url:
+        return _ipv4_loopback(base_url.rstrip("/")), model_name
+
+    if provider == "ollama":
+        root = env.get("LLM_BASE_URL") or env.get("OLLAMA_BASE_URL") or "http://127.0.0.1:11434"
+        root = root.rstrip("/")
+        if root.endswith("/v1"):
+            resolved = root
+        else:
+            resolved = f"{root}/v1"
+        return _ipv4_loopback(resolved), model_name
+
+    if provider == "sglang":
+        root = env.get("SGLANG_BASE_URL") or "http://127.0.0.1:30000/v1"
+        return _ipv4_loopback(root.rstrip("/")), model_name
+
+    root = env.get("LM_STUDIO_BASE_URL") or "http://127.0.0.1:1234/v1"
+    return _ipv4_loopback(root.rstrip("/")), model_name
 
 
 def _percentiles(data: list[float]) -> dict[str, float]:
@@ -335,29 +385,20 @@ def main() -> None:
     def _resolve(val: str) -> str:
         return _resolve_env_str(val, env)
 
-    ar_cfg = app_cfg.get("agentic_reasoning", {})
-    agents = ar_cfg.get("agents", {})
-    default_model = "unknown"
-    default_url = "http://localhost:1234/v1"
+    for key, value in list(env.items()):
+        env[key] = _resolve(value)
 
-    if agents:
-        first_agent = next(iter(agents.values()))
-        default_model = first_agent.get("model", "unknown")
-
-    # Try to get base_url from first agent's LLM config
-    llm_configs = ar_cfg.get("llm_configs", {})
-    if llm_configs:
-        first_llm = next(iter(llm_configs.values()))
-        raw_url = first_llm.get("base_url", default_url)
-        default_url = _resolve(raw_url)
-
-    # Fallback to env var
-    if "LM_STUDIO_BASE_URL" in env:
-        default_url = env["LM_STUDIO_BASE_URL"]
+    base_url, model_name = resolve_inference_endpoint(
+        app_cfg,
+        env,
+        model=args.model,
+        base_url=args.base_url,
+    )
+    log.info("Inference target %s at %s", model_name, base_url)
 
     evaluator = InferenceEvaluator(
-        base_url=args.base_url or default_url,
-        model=args.model or default_model,
+        base_url=base_url,
+        model=model_name,
         max_tokens=args.max_tokens,
         timeout=args.timeout,
         num_runs=args.runs,

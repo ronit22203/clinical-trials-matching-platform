@@ -23,6 +23,9 @@ from typing import Any
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+_DEFAULT_BENCH_PDF = (
+    "data/pdfs/raw/medrxiv/2026/04/22/10.64898/2026.03.17.26348414/paper.pdf"
+)
 
 
 def _sha256(path: Path) -> str:
@@ -89,6 +92,15 @@ def _qdrant_point_count(qdrant_url: str, collection: str) -> int | None:
         return None
 
 
+def _benchmark_pdf() -> Path | None:
+    """The sepsis paper used by ``make deterministic-run``, not a stray upload."""
+    relative = os.environ.get("BENCH_PDF") or _DEFAULT_BENCH_PDF
+    candidate = (_REPO_ROOT / relative).resolve()
+    if candidate.is_file():
+        return candidate
+    return next(iter((_REPO_ROOT / "data" / "pdfs").rglob("*.pdf")), None)
+
+
 def capture(run_id: str, config_path: Path | None = None) -> dict[str, Any]:
     """Return a provenance manifest dict for the given run_id."""
     cfg_path = config_path or (_REPO_ROOT / "config" / "app.yaml")
@@ -115,12 +127,9 @@ def capture(run_id: str, config_path: Path | None = None) -> dict[str, Any]:
         if extra != cfg_path:
             config_hashes[extra.name] = f"sha256:{_sha256(extra)}"
 
-    # Input data
+    # Input data. Prefer the PDF this run was asked to ingest.
     chunks_file = _REPO_ROOT / "data" / "artifacts" / "chunk" / "2026.03.17.26348414_chunks.json"
-    pdf_path = next(
-        iter((_REPO_ROOT / "data" / "pdfs").rglob("*.pdf")),
-        None,
-    )
+    pdf_path = _benchmark_pdf()
 
     input_data: dict[str, Any] = {
         "chunks_file": str(chunks_file.relative_to(_REPO_ROOT)) if chunks_file.exists() else None,
@@ -137,15 +146,19 @@ def capture(run_id: str, config_path: Path | None = None) -> dict[str, Any]:
 
     # Model names from agentic-reasoning config
     ar_cfg = app_cfg.get("agentic_reasoning", {})
-    tools_cfg = ar_cfg.get("tools", {})
-    graphrag_cfg = tools_cfg.get("graphrag", {}).get("config", {})
+    graphrag_cfg = (ar_cfg.get("graphrag") or {}).get("config") or {}
+    if not graphrag_cfg:
+        graphrag_cfg = (
+            (ar_cfg.get("tools") or {}).get("graphrag") or {}
+        ).get("config") or {}
     embedding_model = graphrag_cfg.get("embedding_model", "unknown")
 
-    agents = ar_cfg.get("agents", {})
-    agent_model = "unknown"
-    if agents:
-        first_agent = next(iter(agents.values()))
-        agent_model = first_agent.get("model", "unknown")
+    agent_cfg = ar_cfg.get("agent") or {}
+    if not agent_cfg:
+        legacy_agents = ar_cfg.get("agents") or {}
+        if legacy_agents:
+            agent_cfg = next(iter(legacy_agents.values()))
+    agent_model = agent_cfg.get("model", "unknown")
 
     ingestion_cfg = app_cfg.get("data_ingestion", {})
     kg_cfg = ingestion_cfg.get("knowledge_graph", {})
