@@ -26,9 +26,12 @@ INFERENCE_PYTHON   := $(INFERENCE_DIR)/.venv/bin/python
 # --- [ Workspace storage redirect ] -------------------------------------------
 # When /workspace is mounted (RunPod, Colab, etc.) redirect pip cache + tmp there
 # to avoid exhausting the small root overlay filesystem during GPU package installs.
+# pre_requisites.sh also creates /var/cache/healthcare-platform on cloud VMs that
+# have no /workspace mount. Laptops hit neither path and keep pip's own cache.
 WORKSPACE         ?= $(if $(wildcard /workspace),/workspace,)
-PIP_CACHE_FLAGS   := $(if $(WORKSPACE),--cache-dir $(WORKSPACE)/pip-cache,)
-PIP_TMPDIR_EXPORT := $(if $(WORKSPACE),TMPDIR=$(WORKSPACE)/pip-tmp,)
+CACHE_ROOT        ?= $(if $(WORKSPACE),$(WORKSPACE),$(if $(wildcard /var/cache/healthcare-platform),/var/cache/healthcare-platform,))
+PIP_CACHE_FLAGS   := $(if $(CACHE_ROOT),--cache-dir $(CACHE_ROOT)/pip-cache,)
+PIP_TMPDIR_EXPORT := $(if $(CACHE_ROOT),TMPDIR=$(CACHE_ROOT)/tmp,)
 
 # Inference server defaults (override via env or CLI)
 INFERENCE_MODEL ?= Qwen/Qwen2.5-7B-Instruct
@@ -146,8 +149,13 @@ validate: ## Check Ollama, Qdrant, and Neo4j connectivity
 		set -a; source .env.local; set +a; \
 		OLLAMA_URL="$${OLLAMA_BASE_URL:-http://localhost:11434}"; \
 		LM_STUDIO_URL="$${LM_STUDIO_BASE_URL:-http://localhost:1234/v1}"; \
-		QDRANT_ADDR="$${QDRANT_URL:-http://localhost:6333}"; \
-		NEO4J_BOLT="$${NEO4J_URI:-bolt://localhost:7687}"; \
+		QDRANT_ADDR="$${QDRANT_URL:-http://127.0.0.1:6333}"; \
+		NEO4J_BOLT="$${NEO4J_URI:-bolt://127.0.0.1:7687}"; \
+		rewrite() { printf "%s\n" "$$1" | sed -e "s#://localhost#://127.0.0.1#g" -e "s#://\\[::1\\]#://127.0.0.1#g"; }; \
+		OLLAMA_URL="$$(rewrite "$$OLLAMA_URL")"; \
+		LM_STUDIO_URL="$$(rewrite "$$LM_STUDIO_URL")"; \
+		QDRANT_ADDR="$$(rewrite "$$QDRANT_ADDR")"; \
+		NEO4J_BOLT="$$(rewrite "$$NEO4J_BOLT")"; \
 		printf "Checking Ollama at $$OLLAMA_URL\n"; \
 		if curl --fail --silent "$$OLLAMA_URL/api/tags" >/dev/null; then \
 			printf "  $(GREEN)Ollama OK$(NC)\n"; \
@@ -165,6 +173,7 @@ validate: ## Check Ollama, Qdrant, and Neo4j connectivity
 		NEO4J_HOST=$$(echo "$$NEO4J_BOLT" | sed "s|.*://||" | cut -d: -f1); \
 		NEO4J_PORT=$$(echo "$$NEO4J_BOLT" | sed "s|.*://||" | cut -d: -f2 | cut -d/ -f1); \
 		NEO4J_PORT="$${NEO4J_PORT:-7687}"; \
+		case "$$NEO4J_HOST" in localhost|::1) NEO4J_HOST=127.0.0.1 ;; esac; \
 		nc -z -w 3 "$$NEO4J_HOST" "$$NEO4J_PORT" \
 			&& printf "  $(GREEN)Neo4j OK at $$NEO4J_HOST:$$NEO4J_PORT$(NC)\n" \
 			|| { printf "  $(RED)FAIL: Neo4j not reachable at $$NEO4J_HOST:$$NEO4J_PORT$(NC)\n"; exit 1; }; \
@@ -214,7 +223,8 @@ ollama-ready:
 		if [ -z "$${OLLAMA_BASE_URL:-}" ] && [ -f .env.local ]; then \
 			set -a; source .env.local; set +a; \
 		fi; \
-		URL="$${OLLAMA_BASE_URL:-http://localhost:11434}"; \
+		URL="$${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"; \
+		URL="$$(printf "%s" "$$URL" | sed -e "s#://localhost#://127.0.0.1#g" -e "s#://\\[::1\\]#://127.0.0.1#g")"; \
 		if ! curl --fail --silent "$$URL/api/tags" >/dev/null 2>&1; then \
 			command -v ollama >/dev/null 2>&1 \
 				|| { printf "$(RED)FAIL: Ollama is not installed$(NC)\n  Run: make inference-ollama-install\n"; exit 1; }; \
@@ -240,14 +250,28 @@ ollama-ready:
 		printf "$(GREEN)Ollama ready with $(INFERENCE_MODEL_OLLAMA)$(NC)\n"'
 
 dev: dev-kill ollama-ready ## ★ Start all services: Ollama, reasoning API (:8000), ingestion API (:8002), blueprint UI (:5173)
-	@printf "$(BOLD)$(GREEN)Starting all services…$(NC)\n"
-	@printf "  Reasoning API  → $(CYAN)http://localhost:8000$(NC)\n"
-	@printf "  Ingestion API  → $(CYAN)http://localhost:8002$(NC)\n"
-	@printf "  Blueprint UI   → $(CYAN)http://localhost:5173$(NC)\n\n"
-	@printf "  Press $(BOLD)Ctrl+C$(NC) to stop all services.\n\n"
-	@trap 'kill 0' INT TERM; \
-	 (cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --port 8000 --reload 2>&1 | sed 's/^/[reasoning] /') & \
-	 (cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m uvicorn src.api.server:app --port 8002 --reload 2>&1 | sed 's/^/[ingestion] /') & \
+	@reasoning_host=0.0.0.0; ingestion_host=0.0.0.0; \
+	reasoning_port=8000; ingestion_port=8002; \
+	if [ -f .env.local ]; then \
+	  rh=$$(sed -n 's/^REASONING_API_HOST=//p' .env.local | tail -1 | tr -d "\"'"); \
+	  ih=$$(sed -n 's/^INGESTION_API_HOST=//p' .env.local | tail -1 | tr -d "\"'"); \
+	  rp=$$(sed -n 's/^REASONING_API_PORT=//p' .env.local | tail -1 | tr -d "\"'"); \
+	  ip=$$(sed -n 's/^INGESTION_API_PORT=//p' .env.local | tail -1 | tr -d "\"'"); \
+	  [ -n "$$rh" ] && reasoning_host=$$rh; \
+	  [ -n "$$ih" ] && ingestion_host=$$ih; \
+	  [ -n "$$rp" ] && reasoning_port=$$rp; \
+	  [ -n "$$ip" ] && ingestion_port=$$ip; \
+	fi; \
+	case "$$reasoning_host" in 127.0.0.1|localhost|::1) reasoning_host=0.0.0.0 ;; esac; \
+	case "$$ingestion_host" in 127.0.0.1|localhost|::1) ingestion_host=0.0.0.0 ;; esac; \
+	printf "$(BOLD)$(GREEN)Starting all services…$(NC)\n"; \
+	printf "  Reasoning API  → $(CYAN)http://127.0.0.1:$$reasoning_port$(NC) (bind $$reasoning_host)\n"; \
+	printf "  Ingestion API  → $(CYAN)http://127.0.0.1:$$ingestion_port$(NC) (bind $$ingestion_host)\n"; \
+	printf "  Blueprint UI   → $(CYAN)http://127.0.0.1:5173$(NC)\n\n"; \
+	printf "  Press $(BOLD)Ctrl+C$(NC) to stop all services.\n\n"; \
+	trap 'kill 0' INT TERM; \
+	 (cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --host "$$reasoning_host" --port "$$reasoning_port" --reload 2>&1 | sed 's/^/[reasoning] /') & \
+	 (cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m uvicorn src.api.server:app --host "$$ingestion_host" --port "$$ingestion_port" --reload 2>&1 | sed 's/^/[ingestion] /') & \
 	 (cd $(BLUEPRINT_DIR) && npm run dev 2>&1 | sed 's/^/[blueprint] /') & \
 	 wait
 
@@ -511,7 +535,15 @@ reasoning-run-query: ## Run one reasoning query (QUERY=...)
 	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m src query "$(QUERY)"
 
 reasoning-serve: ## Start reasoning HTTP API server on :8000
-	@cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --port 8000 --reload
+	@reasoning_host=0.0.0.0; reasoning_port=8000; \
+	if [ -f .env.local ]; then \
+	  rh=$$(sed -n 's/^REASONING_API_HOST=//p' .env.local | tail -1 | tr -d "\"'"); \
+	  rp=$$(sed -n 's/^REASONING_API_PORT=//p' .env.local | tail -1 | tr -d "\"'"); \
+	  [ -n "$$rh" ] && reasoning_host=$$rh; \
+	  [ -n "$$rp" ] && reasoning_port=$$rp; \
+	fi; \
+	case "$$reasoning_host" in 127.0.0.1|localhost|::1) reasoning_host=0.0.0.0 ;; esac; \
+	cd $(REASONING_DIR) && $(REASONING_PYTHON) -m uvicorn src.server:app --host "$$reasoning_host" --port "$$reasoning_port" --reload
 
 simple-ui-serve: ## Serve the simple-ui on :3000
 	@python3 -m http.server 3000 --directory simple-ui
@@ -710,7 +742,15 @@ ingestion-install: ## Create data-ingestion venv (python3.11) and install depend
 		$(PIP_TMPDIR_EXPORT) .venv/bin/pip install $(PIP_CACHE_FLAGS) -r requirements.txt
 
 ingestion-api: ## Start ingestion pipeline API server on :8002
-	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m uvicorn src.api.server:app --port 8002 --reload
+	@ingestion_host=0.0.0.0; ingestion_port=8002; \
+	if [ -f .env.local ]; then \
+	  ih=$$(sed -n 's/^INGESTION_API_HOST=//p' .env.local | tail -1 | tr -d "\"'"); \
+	  ip=$$(sed -n 's/^INGESTION_API_PORT=//p' .env.local | tail -1 | tr -d "\"'"); \
+	  [ -n "$$ih" ] && ingestion_host=$$ih; \
+	  [ -n "$$ip" ] && ingestion_port=$$ip; \
+	fi; \
+	case "$$ingestion_host" in 127.0.0.1|localhost|::1) ingestion_host=0.0.0.0 ;; esac; \
+	cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m uvicorn src.api.server:app --host "$$ingestion_host" --port "$$ingestion_port" --reload
 
 ingestion-test: ## Run all ingestion tests
 	@cd $(INGESTION_DIR) && $(INGESTION_PYTHON) -m pytest tests/ -v

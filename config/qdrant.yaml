@@ -1,0 +1,11 @@
+# Native Qdrant config used by shell/start_services.sh and docker/entrypoint.sh.
+# `service.host` must stay 0.0.0.0. The binary's compiled default is fine on a
+# laptop, but a cloud health check that is not sourced from loopback never
+# reaches a process bound only to 127.0.0.1.
+# storage_path is relative to the repository root (the process cwd).
+storage:
+  storage_path: data/qdrant
+service:
+  host: 0.0.0.0
+  http_port: 6333
+  grpc_port: 6334

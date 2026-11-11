@@ -18,15 +18,30 @@ if [[ -x /usr/local/bin/qdrant ]]; then
   if pgrep -f '/usr/local/bin/qdrant' >/dev/null 2>&1; then
     ok "Qdrant already running"
   else
-    info "Starting Qdrant (storage: data/qdrant, port: 6333)…"
+    info "Starting Qdrant (storage: data/qdrant, bind: 0.0.0.0:6333)…"
+    # Host is explicit: a config that says 127.0.0.1, or a probe that uses
+    # `localhost` (often ::1 on Ubuntu), fails the startup health check.
+    qdrant_args=()
+    if [[ -f "$REPO_ROOT/config/qdrant.yaml" ]]; then
+      qdrant_args=(--config-path "$REPO_ROOT/config/qdrant.yaml")
+    fi
     QDRANT__STORAGE__STORAGE_PATH="$REPO_ROOT/data/qdrant" \
+    QDRANT__SERVICE__HOST=0.0.0.0 \
     QDRANT__SERVICE__HTTP_PORT=6333 \
     QDRANT__SERVICE__GRPC_PORT=6334 \
-    nohup /usr/local/bin/qdrant > /tmp/qdrant.log 2>&1 &
+    nohup /usr/local/bin/qdrant "${qdrant_args[@]}" > /tmp/qdrant.log 2>&1 &
     echo $! > "$PIDS/qdrant.pid"
-    sleep 2
-    if curl -sf http://localhost:6333/healthz >/dev/null 2>&1; then
-      ok "Qdrant running (PID $(cat "$PIDS/qdrant.pid")) → http://localhost:6333"
+    qdrant_ready=0
+    for _ in $(seq 1 15); do
+      if curl -sf http://127.0.0.1:6333/healthz >/dev/null 2>&1 \
+        || curl -sf http://127.0.0.1:6333/readyz >/dev/null 2>&1; then
+        qdrant_ready=1
+        break
+      fi
+      sleep 1
+    done
+    if [[ "$qdrant_ready" -eq 1 ]]; then
+      ok "Qdrant running (PID $(cat "$PIDS/qdrant.pid")) → http://127.0.0.1:6333"
     else
       warn "Qdrant started but health check pending — check /tmp/qdrant.log"
     fi
@@ -40,19 +55,25 @@ if command -v neo4j >/dev/null 2>&1; then
   if pgrep -f 'neo4j' >/dev/null 2>&1; then
     ok "Neo4j already running"
   else
-    info "Starting Neo4j (bolt: 7687, http: 7474)…"
-    # 'neo4j console' is the correct way to start Neo4j without systemd in a container
+    info "Starting Neo4j (bolt: 0.0.0.0:7687, http: 0.0.0.0:7474)…"
+    # 'neo4j console' is the correct way to start Neo4j without systemd in a container.
+    # Probe 127.0.0.1, not localhost: Ubuntu resolves localhost to ::1 first.
     nohup neo4j console > /tmp/neo4j.log 2>&1 &
     echo $! > "$PIDS/neo4j.pid"
-    info "Waiting for Neo4j to be ready (up to 30s)…"
-    _w=0
-    until curl -sf http://localhost:7474 >/dev/null 2>&1; do
-      (( _w >= 30 )) && { warn "Neo4j not ready after 30s — check /tmp/neo4j.log"; break; }
-      sleep 3; (( _w += 3 ))
+    info "Waiting for Neo4j bolt :7687 (up to 30s)…"
+    neo4j_ready=0
+    for _ in $(seq 1 15); do
+      if nc -z -w 2 127.0.0.1 7687 >/dev/null 2>&1; then
+        neo4j_ready=1
+        break
+      fi
+      sleep 2
     done
-    curl -sf http://localhost:7474 >/dev/null 2>&1 \
-      && ok "Neo4j running (PID $(cat "$PIDS/neo4j.pid")) → http://localhost:7474" \
-      || true
+    if [[ "$neo4j_ready" -eq 1 ]]; then
+      ok "Neo4j running (PID $(cat "$PIDS/neo4j.pid")) → bolt://127.0.0.1:7687"
+    else
+      warn "Neo4j not ready after 30s — check /tmp/neo4j.log"
+    fi
   fi
 else
   warn "neo4j not found. Run: ./scripts/pre_requisites.sh"

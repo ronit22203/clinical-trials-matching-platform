@@ -45,7 +45,7 @@ resource "runpod_pod" "platform" {
   gpu_count            = 1
   gpu_type_ids         = var.gpu_type_ids
   ports                = var.ports
-  interruptible        = false
+  interruptible        = true
   volume_in_gb         = var.volume_in_gb
   container_disk_in_gb = var.container_disk_in_gb
 

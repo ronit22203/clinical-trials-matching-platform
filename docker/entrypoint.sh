@@ -96,20 +96,32 @@ info "Starting Neo4j…"
 neo4j start 2>/dev/null || true
 # Wait up to 30s for Neo4j bolt port
 for i in $(seq 1 15); do
-  nc -z localhost 7687 2>/dev/null && break || sleep 2
+  nc -z -w 2 127.0.0.1 7687 2>/dev/null && break || sleep 2
 done
-nc -z localhost 7687 2>/dev/null && ok "Neo4j :7687 ready" || warn "Neo4j not responding — check logs"
+nc -z -w 2 127.0.0.1 7687 2>/dev/null && ok "Neo4j :7687 ready" || warn "Neo4j not responding — check logs"
 
 info "Starting Qdrant…"
-nohup qdrant --config-path "$REPO_DIR/config/qdrant.yaml" \
-  > /workspace/qdrant.log 2>&1 &
-sleep 3
-nc -z localhost 6333 2>/dev/null && ok "Qdrant :6333 ready" || {
-  # Fallback: start without config if qdrant.yaml doesn't exist
-  nohup qdrant > /workspace/qdrant.log 2>&1 &
-  sleep 3
-  nc -z localhost 6333 2>/dev/null && ok "Qdrant :6333 ready" || warn "Qdrant not responding"
-}
+# Env overrides keep the process on 0.0.0.0:6333 even if the yaml host drifted.
+qdrant_cmd=(qdrant)
+if [[ -f "$REPO_DIR/config/qdrant.yaml" ]]; then
+  qdrant_cmd+=(--config-path "$REPO_DIR/config/qdrant.yaml")
+fi
+QDRANT__SERVICE__HOST=0.0.0.0 \
+QDRANT__SERVICE__HTTP_PORT=6333 \
+nohup "${qdrant_cmd[@]}" > /workspace/qdrant.log 2>&1 &
+qdrant_ready=0
+for _ in $(seq 1 15); do
+  if nc -z -w 2 127.0.0.1 6333 2>/dev/null; then
+    qdrant_ready=1
+    break
+  fi
+  sleep 1
+done
+if [[ "$qdrant_ready" -eq 1 ]]; then
+  ok "Qdrant :6333 ready"
+else
+  warn "Qdrant not responding — check /workspace/qdrant.log"
+fi
 
 # ── 8. Start platform services ────────────────────────────────────────────────
 echo ""
